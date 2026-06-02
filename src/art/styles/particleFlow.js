@@ -1,16 +1,14 @@
 // ---------------------------------------------------------------------------
 // Art option: "Particle Flow".
 //
-// A point-cloud of ~120k particles streaming along a curl-noise flow field —
-// the other signature Anadol look ("machine hallucination" point clouds). The
-// motion is computed entirely on the GPU and is STATELESS: each particle has a
-// fixed seed + phase, and the vertex shader integrates a few curl steps to find
-// its current position. The phase loops, so particles continuously stream and
-// respawn, fading in/out so the loop is invisible. No ping-pong buffers needed.
+// ~120k particles streaming a curl-noise flow field — the Anadol point-cloud
+// look. Motion is stateless on the GPU: each particle integrates a few curl
+// steps from its seed; the looping phase makes them stream and respawn.
 //
-// Events spawn "bursts" that locally brighten, enlarge and recolour nearby
-// particles; a flavour additionally tints the whole cloud. Energy raises the
-// flow speed, brightness and point size.
+// The three distinct data reactions (art/effects.js) live in the vertex shader:
+//   visitor  → RIPPLE     : an expanding bright ring travels through the cloud
+//   sale/flav→ BLAST      : a central colour burst (brighter, larger points)
+//   product  → DISRUPTION : a shock ring SCATTERS particles (a glitch in flow)
 // ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
@@ -18,20 +16,21 @@ import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
 import { EventTypes } from '../../core/events.js';
 import { NOISE_GLSL } from '../shaderLib.js';
+import { EffectField, KIND_ENERGY } from '../effects.js';
 
 const COUNT = 120000;
-const BURSTS = 8;
+const FX_MAX = 8;
 const BASE_ENERGY = 0.5;
 
 const vertexShader = /* glsl */ `
   precision highp float;
-  #define BURSTS ${BURSTS}
+  #define FX_MAX ${FX_MAX}
   attribute vec2 aMeta;            // x = speed, y = colour parameter
   uniform float uTime, uAspect, uEnergy, uPaletteShift, uTintAmount;
   uniform vec3  uTint;
-  uniform vec3  uBurstPos[BURSTS]; // xy in 0..1, z = strength
-  uniform vec3  uBurstColor[BURSTS];
-  uniform int   uBurstCount;
+  uniform vec4  uFxPos[FX_MAX];    // xy(0..1), z = ageNorm, w = kind
+  uniform vec3  uFxColor[FX_MAX];
+  uniform int   uFxCount;
   varying vec3  vColor;
   varying float vAlpha;
 
@@ -49,7 +48,6 @@ const vertexShader = /* glsl */ `
     float speed = aMeta.x;
     float phase = fract(position.z + uTime * speed * (0.3 + 0.6 * uEnergy) * 0.05);
 
-    // Integrate a few curl steps from the seed; distance scales with phase.
     vec2 pos = position.xy;
     float stride = 0.40 * phase;
     for (int i = 0; i < 6; i++) {
@@ -57,28 +55,49 @@ const vertexShader = /* glsl */ `
       pos += normalize(fv + 1e-5) * (stride / 6.0);
     }
 
-    vColor = palette(aMeta.y + uPaletteShift);
+    vec3 baseCol = palette(aMeta.y + uPaletteShift);
+    vec3 fxCol = vec3(0.0);
+    float bright = 0.0;
+    float sizeBoost = 0.0;
 
-    float boost = 0.0;
-    for (int i = 0; i < BURSTS; i++) {
-      if (i >= uBurstCount) break;
-      vec3 b = uBurstPos[i];
-      vec2 bp = b.xy * 2.0 - 1.0;
-      float d = distance(pos, bp);
-      float infl = exp(-d * d * 8.0) * b.z;
-      vColor = mix(vColor, uBurstColor[i], clamp(infl, 0.0, 1.0) * 0.85);
-      boost += infl;
+    for (int i = 0; i < FX_MAX; i++) {
+      if (i >= uFxCount) break;
+      vec4 fx = uFxPos[i];
+      vec2 c = fx.xy * 2.0 - 1.0;
+      float dist = distance(pos, c);
+      float age = fx.z;
+      float fade = 1.0 - age;
+      if (fx.w < 0.5) {
+        // RIPPLE: expanding bright ring.
+        float ring = exp(-pow((dist - age * 1.3) * 4.0, 2.0));
+        fxCol += uFxColor[i] * ring * fade;
+        bright += ring * fade * 0.8;
+        sizeBoost += ring * fade * 2.0;
+      } else if (fx.w < 1.5) {
+        // BLAST: central colour burst.
+        float core = exp(-dist * dist * 7.0);
+        fxCol += uFxColor[i] * core * fade * 1.6;
+        bright += core * fade * 1.2;
+        sizeBoost += core * fade * 5.0;
+      } else {
+        // DISRUPTION: shock ring scatters particles.
+        float shell = exp(-pow((dist - age * 1.4) * 5.0, 2.0));
+        vec2 jdir = normalize(vec2(sin(position.x * 54.0 + position.y * 13.0),
+                                   cos(position.y * 51.0 - position.x * 7.0)) + 1e-5);
+        pos += jdir * shell * fade * 0.07;
+        fxCol += uFxColor[i] * shell * fade * 0.7;
+        sizeBoost += shell * fade * 2.5;
+      }
     }
-    vColor = mix(vColor, uTint, uTintAmount * 0.5);
-    // Lower per-particle brightness so dense flow ridges saturate to colour
-    // rather than blowing out to white under additive blending.
-    vColor *= (0.30 + 0.5 * uEnergy) * (1.0 + boost * 1.6);
 
-    // Fade in/out across the loop so respawns are invisible.
+    vColor = mix(baseCol, uTint, uTintAmount * 0.5);
+    vColor *= (0.30 + 0.5 * uEnergy);
+    vColor += fxCol;
+    vColor *= (1.0 + bright);
+
     vAlpha = smoothstep(0.0, 0.1, phase) * smoothstep(1.0, 0.82, phase);
-
     gl_Position = vec4(pos, 0.0, 1.0);
-    gl_PointSize = 1.3 + 1.8 * uEnergy + boost * 5.0;
+    gl_PointSize = 1.3 + 1.8 * uEnergy + sizeBoost;
   }
 `;
 
@@ -89,7 +108,7 @@ const fragmentShader = /* glsl */ `
   void main(){
     vec2 c = gl_PointCoord - 0.5;
     float a = smoothstep(0.25, 0.0, dot(c, c)) * vAlpha;
-    gl_FragColor = vec4(vColor * a, a); // additive-friendly premultiply
+    gl_FragColor = vec4(vColor * a, a);
   }
 `;
 
@@ -105,7 +124,7 @@ export class ParticleFlow extends BaseArt {
     this.paletteShift = 0;
     this.tint = new THREE.Color('#ffffff');
     this.tintAmount = 0;
-    this.bursts = [];
+    this.fx = new EffectField(FX_MAX);
 
     const positions = new Float32Array(COUNT * 3);
     const meta = new Float32Array(COUNT * 2);
@@ -114,10 +133,8 @@ export class ParticleFlow extends BaseArt {
       const sy = (Math.random() * 2 - 1) * 1.1;
       positions[i * 3 + 0] = sx;
       positions[i * 3 + 1] = sy;
-      positions[i * 3 + 2] = Math.random(); // phase offset
-      meta[i * 2 + 0] = 0.5 + Math.random(); // speed
-      // Colour varies smoothly with seed POSITION so neighbours share a hue →
-      // coherent flowing colour regions instead of random per-particle speckle.
+      positions[i * 3 + 2] = Math.random();
+      meta[i * 2 + 0] = 0.5 + Math.random();
       meta[i * 2 + 1] = 0.5 + 0.25 * Math.sin(sx * 2.0) + 0.22 * Math.cos(sy * 1.7) + (Math.random() - 0.5) * 0.06;
     }
     const geo = new THREE.BufferGeometry();
@@ -125,16 +142,17 @@ export class ParticleFlow extends BaseArt {
     geo.setAttribute('aMeta', new THREE.BufferAttribute(meta, 2));
     this.geometry = geo;
 
+    const aspect = this.size.width / this.size.height;
     this.uniforms = {
       uTime: { value: 0 },
-      uAspect: { value: this.size.width / this.size.height },
+      uAspect: { value: aspect },
       uEnergy: { value: this.energy },
       uPaletteShift: { value: 0 },
       uTint: { value: this.tint.clone() },
       uTintAmount: { value: 0 },
-      uBurstPos: { value: Array.from({ length: BURSTS }, () => new THREE.Vector3()) },
-      uBurstColor: { value: Array.from({ length: BURSTS }, () => new THREE.Color()) },
-      uBurstCount: { value: 0 },
+      uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
+      uFxColor: { value: Array.from({ length: FX_MAX }, () => new THREE.Color()) },
+      uFxCount: { value: 0 },
     };
     this.material = new THREE.ShaderMaterial({
       uniforms: this.uniforms,
@@ -149,7 +167,7 @@ export class ParticleFlow extends BaseArt {
     this.points = new THREE.Points(this.geometry, this.material);
     this.points.frustumCulled = false;
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color('#000000'); // RT clears to opaque black
+    this.scene.background = new THREE.Color('#000000');
     this.camera = new THREE.Camera();
     this.scene.add(this.points);
 
@@ -165,37 +183,12 @@ export class ParticleFlow extends BaseArt {
     this.renderTarget.setSize(size.width, size.height);
   }
 
-  _burst(p) {
-    p.age = 0;
-    this.bursts.push(p);
-    if (this.bursts.length > BURSTS) this.bursts.shift();
-  }
-
   onEvent(event) {
-    const x = Math.random();
-    const y = Math.random();
-    switch (event.type) {
-      case EventTypes.VISITOR_ENTERED:
-        this._burst({ x, y, life: 2.4, strength: 0.7, color: new THREE.Color('#7fe0ff') });
-        this.energy += 0.12;
-        break;
-      case EventTypes.SALE_MADE:
-        this._burst({ x, y, life: 3.6, strength: 1.0, color: new THREE.Color('#fff0bf') });
-        this.energy += 0.5;
-        break;
-      case EventTypes.PRODUCT_SOLD:
-        this._burst({ x, y, life: 3.0, strength: 0.85, color: new THREE.Color('#c79bff') });
-        this.energy += 0.25;
-        this.paletteShift += 0.06;
-        break;
-      case EventTypes.FLAVOUR_SOLD: {
-        const c = new THREE.Color(event.data?.color || '#ffffff');
-        this._burst({ x, y, life: 3.2, strength: 0.95, color: c });
-        this.tint.copy(c);
-        this.tintAmount = Math.min(0.8, this.tintAmount + 0.5);
-        this.energy += 0.35;
-        break;
-      }
+    const fx = this.fx.spawn(event);
+    if (fx) this.energy += KIND_ENERGY[fx.kind];
+    if (event.type === EventTypes.FLAVOUR_SOLD) {
+      this.tint.set(event.data?.color || '#ffffff');
+      this.tintAmount = Math.min(0.8, this.tintAmount + 0.5);
     }
   }
 
@@ -204,23 +197,14 @@ export class ParticleFlow extends BaseArt {
     this.energy += (BASE_ENERGY - this.energy) * Math.min(1, dt * 0.6);
     this.tintAmount += (0 - this.tintAmount) * Math.min(1, dt * 0.35);
     this.paletteShift += dt * 0.01;
+    this.fx.update(dt);
 
     this.uniforms.uTime.value = this.time;
     this.uniforms.uEnergy.value = this.energy;
     this.uniforms.uPaletteShift.value = this.paletteShift;
     this.uniforms.uTint.value.copy(this.tint);
     this.uniforms.uTintAmount.value = this.tintAmount;
-
-    for (const b of this.bursts) b.age += dt;
-    this.bursts = this.bursts.filter((b) => b.age < b.life);
-    const n = Math.min(this.bursts.length, BURSTS);
-    for (let i = 0; i < n; i++) {
-      const b = this.bursts[i];
-      const strength = (1 - b.age / b.life) * b.strength;
-      this.uniforms.uBurstPos.value[i].set(b.x, b.y, strength);
-      this.uniforms.uBurstColor.value[i].copy(b.color);
-    }
-    this.uniforms.uBurstCount.value = n;
+    this.uniforms.uFxCount.value = this.fx.write(this.uniforms.uFxPos.value, this.uniforms.uFxColor.value);
 
     this.renderer.setRenderTarget(this.renderTarget);
     this.renderer.render(this.scene, this.camera);

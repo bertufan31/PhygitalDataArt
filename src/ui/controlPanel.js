@@ -109,27 +109,22 @@ export function initControlPanel({ root, state, dispatch, fire }) {
   }
 
   // -- Live data / DJ pads ----------------------------------------------
-  const visitorPad = el('button', {
-    class: 'pad pad--visitor',
-    'data-evt': EventTypes.VISITOR_ENTERED,
-    text: 'Someone entered',
-    onclick: () => fire(makeEvent(EventTypes.VISITOR_ENTERED)),
-  });
-  const salePad = el('button', {
-    class: 'pad pad--sale',
-    'data-evt': EventTypes.SALE_MADE,
-    text: 'Sale made',
-    onclick: () => fire(makeEvent(EventTypes.SALE_MADE, { amount: 5 + Math.round(Math.random() * 120) })),
-  });
-  const productPad = el('button', {
-    class: 'pad pad--product',
-    'data-evt': EventTypes.PRODUCT_SOLD,
-    text: 'Product sold',
-    onclick: () =>
-      fire(makeEvent(EventTypes.PRODUCT_SOLD, { product: Products[(Math.random() * Products.length) | 0] })),
-  });
+  // Each pad shows the distinct effect it triggers, so you can demonstrate the
+  // data → effect principle live.
+  const pad = (cls, evt, title, fx, onclick) =>
+    el('button', { class: `pad ${cls}`, 'data-evt': evt, onclick }, [
+      el('span', { class: 'pad-title', text: title }),
+      el('span', { class: 'pad-fx', text: fx }),
+    ]);
+  const visitorPad = pad('pad--visitor', EventTypes.VISITOR_ENTERED, 'Someone entered', 'ripple',
+    () => fire(makeEvent(EventTypes.VISITOR_ENTERED)));
+  const salePad = pad('pad--sale', EventTypes.SALE_MADE, 'Sale made', 'blast',
+    () => fire(makeEvent(EventTypes.SALE_MADE, { amount: 5 + Math.round(Math.random() * 120) })));
+  const productPad = pad('pad--product', EventTypes.PRODUCT_SOLD, 'Product sold', 'disruption',
+    () => fire(makeEvent(EventTypes.PRODUCT_SOLD, { product: Products[(Math.random() * Products.length) | 0] })));
   const padRow = el('div', { class: 'pad-grid' }, [visitorPad, salePad, productPad]);
 
+  const flavourNote = el('div', { class: 'fx-note', text: 'Consumable / flavour sale → colour blast (in its colour)' });
   const flavourGrid = el('div', { class: 'flavour-grid' });
   for (const f of Flavours) {
     const b = el('button', {
@@ -211,7 +206,7 @@ export function initControlPanel({ root, state, dispatch, fire }) {
       section('Display target', targetRow),
       section('Frame style', frameRow),
       section('Simulator', simBody),
-      section('Live data', el('div', { class: 'stack' }, [padRow, flavourGrid])),
+      section('Live data', el('div', { class: 'stack' }, [padRow, flavourNote, flavourGrid])),
       section('Frame & grid', frameBody),
     ]),
     section('Live feed', feed),

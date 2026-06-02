@@ -1,21 +1,24 @@
 // ---------------------------------------------------------------------------
 // Art option: "Pigment Plumes".
 //
-// Minimal and elegant: big, soft Gaussian colour clouds bloom from each event
-// over near-black, grow, drift and dissipate, mixing where they overlap. A few
-// slow AMBIENT plumes keep it alive when no data is arriving, so it's never
-// empty. Very retail-friendly — calm and premium.
+// Minimal and elegant: big soft colour clouds over near-black, with a few slow
+// AMBIENT plumes so it's never empty. Implements the three distinct reactions
+// (art/effects.js) in its own soft language:
+//   visitor  → RIPPLE     : an expanding ring-shaped plume
+//   sale/flav→ BLAST      : a soft filled colour bloom
+//   product  → DISRUPTION : a jagged, noise-broken plume
 // ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
 import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
-import { EventTypes } from '../../core/events.js';
 import { NOISE_GLSL } from '../shaderLib.js';
+import { effectForEvent, EffectKinds } from '../effects.js';
 
 const MAX_PLUMES = 12;
 const AMBIENT = 3;
 const AMBIENT_COLORS = ['#1d2f5c', '#1f5c57', '#3a1f5c'];
+const KIND_MAX_R = [0.46, 0.5, 0.3]; // ripple, blast, disruption
 
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
@@ -27,28 +30,39 @@ const fragmentShader = /* glsl */ `
   #define MAX_PLUMES ${MAX_PLUMES}
   varying vec2 vUv;
   uniform float uTime, uAspect;
-  uniform vec4 uPlumePos[MAX_PLUMES];   // xy = centre (0..1), z = alpha, w = radius
-  uniform vec3 uPlumeColor[MAX_PLUMES];
-  uniform int  uPlumeCount;
+  uniform vec4  uPlumePos[MAX_PLUMES];   // xy = centre, z = alpha, w = radius
+  uniform vec3  uPlumeColor[MAX_PLUMES];
+  uniform float uPlumeKind[MAX_PLUMES];  // 0 ripple, 1 blast, 2 disruption
+  uniform int   uPlumeCount;
 
   ${NOISE_GLSL}
 
   void main(){
     vec2 uv = vUv;
-    // Organic edges: warp sample point slightly.
     vec2 w = vec2(fbm(uv * 2.0 + uTime * 0.03), fbm(uv * 2.0 + 7.0 - uTime * 0.03));
     vec2 puv = uv + 0.06 * w;
 
-    vec3 col = vec3(0.008, 0.010, 0.018); // faint cool ground
+    vec3 col = vec3(0.008, 0.010, 0.018);
     for (int i = 0; i < MAX_PLUMES; i++) {
       if (i >= uPlumeCount) break;
       vec4 pl = uPlumePos[i];
+      float kind = uPlumeKind[i];
       vec2 dd = (puv - pl.xy); dd.x *= uAspect;
-      float g = exp(-dot(dd, dd) / (pl.w * pl.w));
+      float d = length(dd);
+      float g;
+      if (kind < 0.5) {
+        g = exp(-pow((d - pl.w) / 0.06, 2.0));            // ripple: ring
+      } else if (kind < 1.5) {
+        g = exp(-(d * d) / (pl.w * pl.w));                // blast: soft bloom
+      } else {
+        float base = exp(-(d * d) / (pl.w * pl.w));        // disruption: jagged
+        float n = 0.5 + 0.5 * snoise(puv * 16.0 + uTime * 0.5);
+        g = pow(base * n, 1.4);
+      }
       col += uPlumeColor[i] * g * pl.z;
     }
 
-    col = col / (col + vec3(0.7)); // soft tonemap
+    col = col / (col + vec3(0.7));
     col = pow(col, vec3(0.95));
     float vig = smoothstep(1.4, 0.35, length((uv - 0.5) * vec2(uAspect, 1.0)));
     col *= 0.6 + 0.4 * vig;
@@ -66,8 +80,7 @@ export class PigmentPlumes extends BaseArt {
     this.renderer = ctx.renderer;
     this.size = ctx.size;
     this.time = 0;
-    this.plumes = []; // { x, y, color, age, life, maxR, ambient }
-
+    this.plumes = [];
     for (let i = 0; i < AMBIENT; i++) this._spawnAmbient();
 
     this.uniforms = {
@@ -75,6 +88,7 @@ export class PigmentPlumes extends BaseArt {
       uAspect: { value: this.size.width / this.size.height },
       uPlumePos: { value: Array.from({ length: MAX_PLUMES }, () => new THREE.Vector4()) },
       uPlumeColor: { value: Array.from({ length: MAX_PLUMES }, () => new THREE.Color()) },
+      uPlumeKind: { value: new Float32Array(MAX_PLUMES) },
       uPlumeCount: { value: 0 },
     };
 
@@ -104,37 +118,27 @@ export class PigmentPlumes extends BaseArt {
       age: 0,
       life: 9 + Math.random() * 6,
       maxR: 0.35 + Math.random() * 0.2,
+      kind: EffectKinds.BLAST,
       ambient: true,
     });
   }
 
-  _add(p) {
-    p.age = 0;
-    p.ambient = false;
-    this.plumes.push(p);
-    // Trim oldest non-ambient if over budget.
+  onEvent(event) {
+    const e = effectForEvent(event);
+    if (!e) return;
+    this.plumes.push({
+      x: Math.random(),
+      y: Math.random(),
+      color: new THREE.Color(e.color),
+      age: 0,
+      life: e.life * 2.2, // plumes linger longer than the shared default
+      maxR: KIND_MAX_R[e.kind],
+      kind: e.kind,
+      ambient: false,
+    });
     if (this.plumes.length > MAX_PLUMES) {
       const idx = this.plumes.findIndex((q) => !q.ambient);
       this.plumes.splice(idx >= 0 ? idx : 0, 1);
-    }
-  }
-
-  onEvent(event) {
-    const x = Math.random();
-    const y = Math.random();
-    switch (event.type) {
-      case EventTypes.VISITOR_ENTERED:
-        this._add({ x, y, color: new THREE.Color('#7fe0ff'), life: 4.0, maxR: 0.18 });
-        break;
-      case EventTypes.SALE_MADE:
-        this._add({ x, y, color: new THREE.Color('#ffe6a3'), life: 6.0, maxR: 0.5 });
-        break;
-      case EventTypes.PRODUCT_SOLD:
-        this._add({ x, y, color: new THREE.Color('#c79bff'), life: 5.0, maxR: 0.3 });
-        break;
-      case EventTypes.FLAVOUR_SOLD:
-        this._add({ x, y, color: new THREE.Color(event.data?.color || '#ffffff'), life: 5.5, maxR: 0.38 });
-        break;
     }
   }
 
@@ -143,7 +147,6 @@ export class PigmentPlumes extends BaseArt {
     this.uniforms.uTime.value = this.time;
 
     for (const p of this.plumes) p.age += dt;
-    // Recycle dead plumes; keep ambient population topped up.
     const alive = [];
     let ambientAlive = 0;
     for (const p of this.plumes) {
@@ -163,9 +166,13 @@ export class PigmentPlumes extends BaseArt {
       const p = this.plumes[i];
       const k = p.age / p.life;
       const alpha = smoothstep(0, 0.2, k) * smoothstep(1, 0.6, k) * (p.ambient ? 0.7 : 1.0);
-      const radius = 0.05 + (p.maxR - 0.05) * Math.min(1, k * 1.6);
+      let radius;
+      if (p.kind === EffectKinds.RIPPLE) radius = p.maxR * smoothstep(0, 1, k); // expands outward
+      else if (p.kind === EffectKinds.DISRUPTION) radius = p.maxR * (0.5 + 0.5 * k);
+      else radius = 0.05 + (p.maxR - 0.05) * Math.min(1, k * 1.6); // blast / ambient
       this.uniforms.uPlumePos.value[i].set(p.x, p.y, alpha, radius);
       this.uniforms.uPlumeColor.value[i].copy(p.color);
+      this.uniforms.uPlumeKind.value[i] = p.kind;
     }
     this.uniforms.uPlumeCount.value = n;
 
@@ -183,7 +190,7 @@ export class PigmentPlumes extends BaseArt {
   }
 }
 
-// Local smoothstep (JS) — mirrors GLSL semantics for the alpha/radius ramps.
+// Local smoothstep (JS) mirroring GLSL semantics for the alpha/radius ramps.
 function smoothstep(edge0, edge1, x) {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
   return t * t * (3 - 2 * t);

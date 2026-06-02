@@ -2,18 +2,19 @@
 // Art option: "Liquid Light".
 //
 // The classic Anadol nebula: large, smooth, luminous plumes drifting slowly
-// over deep black with lots of negative space. Lower-frequency and calmer than
-// Data Pigments — fewer, bigger forms that glow. Same data reactions and the
-// same "energy" breathing model.
+// over deep black with lots of negative space. Implements the three distinct
+// data reactions (art/effects.js): visitor RIPPLE ring, sale/flavour colour
+// BLAST, product DISRUPTION warp — plus a flavour dye and the energy model.
 // ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
 import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
 import { EventTypes } from '../../core/events.js';
-import { NOISE_GLSL } from '../shaderLib.js';
+import { NOISE_GLSL, FX_GLSL } from '../shaderLib.js';
+import { EffectField, KIND_ENERGY } from '../effects.js';
 
-const SPLATS = 16;
+const FX_MAX = 16;
 const BASE_ENERGY = 0.5;
 
 const vertexShader = /* glsl */ `
@@ -23,17 +24,13 @@ const vertexShader = /* glsl */ `
 
 const fragmentShader = /* glsl */ `
   precision highp float;
-  #define SPLATS ${SPLATS}
   varying vec2 vUv;
   uniform float uTime, uAspect, uEnergy, uWarp, uPaletteShift, uTintAmount;
   uniform vec3  uTint;
-  uniform vec3  uSplatPos[SPLATS];
-  uniform vec3  uSplatColor[SPLATS];
-  uniform int   uSplatCount;
 
   ${NOISE_GLSL}
+  ${FX_GLSL}
 
-  // Deep blue → teal → magenta → gold.
   vec3 palette(float t){
     vec3 a = vec3(0.5, 0.5, 0.55);
     vec3 b = vec3(0.5, 0.5, 0.5);
@@ -44,35 +41,21 @@ const fragmentShader = /* glsl */ `
 
   void main(){
     vec2 uv = vUv;
-    vec2 p = (uv - 0.5); p.x *= uAspect; p *= 1.4;
+    vec2 cuv = (uv - 0.5); cuv.x *= uAspect;
+    vec2 p = (cuv + fxDisplace(cuv)) * 1.4;
     float t = uTime * 0.035;
 
-    // A single gentle domain warp → large, smooth forms.
     vec2 q = vec2(fbm(p * 0.8 + vec2(0.0, t)), fbm(p * 0.8 + vec2(4.0, -t)));
     float v = fbm(p + uWarp * q + 0.2 * t);
     v = v * 0.5 + 0.5;
 
-    // Lots of black: only the upper range lights up; a softer wider glow blooms.
     float lum  = pow(smoothstep(0.55, 0.95, v), 1.4);
     float glow = pow(smoothstep(0.45, 1.0, v), 2.0);
-
     float tt = v * 0.8 + 0.2 * q.x + uPaletteShift;
     vec3 col = palette(tt) * (lum * 1.7 + glow * 0.5) * (0.7 + 0.5 * uEnergy);
 
-    col = mix(col, uTint * (0.6 + 1.0 * lum), uTintAmount * lum);
-
-    // Large soft luminous splats.
-    vec2 pp = (uv - 0.5); pp.x *= uAspect;
-    for (int i = 0; i < SPLATS; i++) {
-      if (i >= uSplatCount) break;
-      vec3 s = uSplatPos[i];
-      float strength = s.z;
-      vec2 cc = (s.xy - 0.5); cc.x *= uAspect;
-      float d = distance(pp, cc);
-      float core = exp(-d * d * 28.0) * strength;
-      float ring = exp(-pow((d - (1.0 - strength) * 0.6) * 6.0, 2.0)) * strength * 0.4;
-      col += uSplatColor[i] * (core * 1.3 + ring);
-    }
+    col = mix(col, uTint * (0.6 + 1.0 * lum), uTintAmount * lum); // flavour dye
+    col += fxColor(cuv);                                          // ripple + blast + shock edge
 
     col = col / (col + vec3(0.75));
     col = pow(col, vec3(0.9));
@@ -96,19 +79,21 @@ export class LiquidLight extends BaseArt {
     this.paletteShift = 0;
     this.tint = new THREE.Color('#ffffff');
     this.tintAmount = 0;
-    this.splats = [];
+    this.fx = new EffectField(FX_MAX);
 
+    const aspect = this.size.width / this.size.height;
     this.uniforms = {
       uTime: { value: 0 },
-      uAspect: { value: this.size.width / this.size.height },
+      uAspect: { value: aspect },
       uEnergy: { value: this.energy },
       uWarp: { value: 1.2 },
       uPaletteShift: { value: 0 },
       uTint: { value: this.tint.clone() },
       uTintAmount: { value: 0 },
-      uSplatPos: { value: Array.from({ length: SPLATS }, () => new THREE.Vector3()) },
-      uSplatColor: { value: Array.from({ length: SPLATS }, () => new THREE.Color()) },
-      uSplatCount: { value: 0 },
+      uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
+      uFxColor: { value: Array.from({ length: FX_MAX }, () => new THREE.Color()) },
+      uFxCount: { value: 0 },
+      uFxAspect: { value: aspect },
     };
 
     this.scene = new THREE.Scene();
@@ -125,41 +110,18 @@ export class LiquidLight extends BaseArt {
 
   resize(size) {
     this.size = size;
-    this.uniforms.uAspect.value = size.width / size.height;
+    const aspect = size.width / size.height;
+    this.uniforms.uAspect.value = aspect;
+    this.uniforms.uFxAspect.value = aspect;
     this.renderTarget.setSize(size.width, size.height);
   }
 
-  _splat(p) {
-    p.age = 0;
-    this.splats.push(p);
-    if (this.splats.length > SPLATS) this.splats.shift();
-  }
-
   onEvent(event) {
-    const x = Math.random();
-    const y = Math.random();
-    switch (event.type) {
-      case EventTypes.VISITOR_ENTERED:
-        this._splat({ x, y, life: 3.0, strength: 0.6, color: new THREE.Color('#7fe0ff') });
-        this.energy += 0.1;
-        break;
-      case EventTypes.SALE_MADE:
-        this._splat({ x, y, life: 5.0, strength: 1.0, color: new THREE.Color('#fff0bf') });
-        this.energy += 0.45;
-        break;
-      case EventTypes.PRODUCT_SOLD:
-        this._splat({ x, y, life: 3.6, strength: 0.8, color: new THREE.Color('#c79bff') });
-        this.energy += 0.22;
-        this.paletteShift += 0.06;
-        break;
-      case EventTypes.FLAVOUR_SOLD: {
-        const c = new THREE.Color(event.data?.color || '#ffffff');
-        this._splat({ x, y, life: 4.4, strength: 0.95, color: c });
-        this.tint.copy(c);
-        this.tintAmount = Math.min(0.85, this.tintAmount + 0.5);
-        this.energy += 0.32;
-        break;
-      }
+    const fx = this.fx.spawn(event);
+    if (fx) this.energy += KIND_ENERGY[fx.kind];
+    if (event.type === EventTypes.FLAVOUR_SOLD) {
+      this.tint.set(event.data?.color || '#ffffff');
+      this.tintAmount = Math.min(0.85, this.tintAmount + 0.5);
     }
   }
 
@@ -168,6 +130,7 @@ export class LiquidLight extends BaseArt {
     this.energy += (BASE_ENERGY - this.energy) * Math.min(1, dt * 0.5);
     this.tintAmount += (0 - this.tintAmount) * Math.min(1, dt * 0.3);
     this.paletteShift += dt * 0.008;
+    this.fx.update(dt);
 
     this.uniforms.uTime.value = this.time;
     this.uniforms.uEnergy.value = this.energy;
@@ -175,17 +138,7 @@ export class LiquidLight extends BaseArt {
     this.uniforms.uPaletteShift.value = this.paletteShift;
     this.uniforms.uTint.value.copy(this.tint);
     this.uniforms.uTintAmount.value = this.tintAmount;
-
-    for (const s of this.splats) s.age += dt;
-    this.splats = this.splats.filter((s) => s.age < s.life);
-    const n = Math.min(this.splats.length, SPLATS);
-    for (let i = 0; i < n; i++) {
-      const s = this.splats[i];
-      const strength = (1 - s.age / s.life) * s.strength;
-      this.uniforms.uSplatPos.value[i].set(s.x, s.y, strength);
-      this.uniforms.uSplatColor.value[i].copy(s.color);
-    }
-    this.uniforms.uSplatCount.value = n;
+    this.uniforms.uFxCount.value = this.fx.write(this.uniforms.uFxPos.value, this.uniforms.uFxColor.value);
 
     this.renderer.setRenderTarget(this.renderTarget);
     this.renderer.render(this.scene, this.camera);

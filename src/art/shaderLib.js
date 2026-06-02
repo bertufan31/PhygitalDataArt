@@ -49,3 +49,68 @@ export const NOISE_GLSL = /* glsl */ `
     return vec2(n1 - n2, -(n3 - n4)) / (2.0 * e);
   }
 `;
+
+// ---------------------------------------------------------------------------
+// Shared "data → effect" GLSL for fullscreen field shaders. Implements the three
+// distinct reactions over a common uniform layout:
+//   uFxPos[i] = vec4(x, y, ageNorm, kind)   kind: 0 ripple, 1 blast, 2 disrupt
+//   uFxColor[i] = vec3
+// Coordinates are in aspect-corrected centred-UV space: cuv = (uv-0.5) with
+// cuv.x *= aspect. Use it like:
+//   vec2 cuv = (uv-0.5); cuv.x *= uFxAspect;
+//   vec2 p   = (cuv + fxDisplace(cuv)) * SCALE;   // disruption warps the field
+//   ... sample your field with p ...
+//   col += fxColor(cuv);                          // ripple + blast + shock edge
+// ---------------------------------------------------------------------------
+export const FX_GLSL = /* glsl */ `
+  #ifndef FX_MAX
+  #define FX_MAX 16
+  #endif
+  uniform vec4  uFxPos[FX_MAX];
+  uniform vec3  uFxColor[FX_MAX];
+  uniform int   uFxCount;
+  uniform float uFxAspect;
+
+  // DISRUPTION only: radial shockwave that displaces the field at its front.
+  vec2 fxDisplace(vec2 cuv){
+    vec2 disp = vec2(0.0);
+    for (int i = 0; i < FX_MAX; i++) {
+      if (i >= uFxCount) break;
+      if (uFxPos[i].w < 1.5) continue;            // skip ripple/blast
+      vec2 c = (uFxPos[i].xy - 0.5); c.x *= uFxAspect;
+      vec2 d = cuv - c;
+      float dist = length(d) + 1e-5;
+      float age = uFxPos[i].z;
+      float shell = exp(-pow((dist - age * 0.8) * 7.0, 2.0));
+      disp += (d / dist) * shell * (1.0 - age) * 0.14;
+    }
+    return disp;
+  }
+
+  // RIPPLE + BLAST colour, plus the bright DISRUPTION shock edge.
+  vec3 fxColor(vec2 cuv){
+    vec3 col = vec3(0.0);
+    for (int i = 0; i < FX_MAX; i++) {
+      if (i >= uFxCount) break;
+      vec4 fx = uFxPos[i];
+      vec2 c = (fx.xy - 0.5); c.x *= uFxAspect;
+      float dist = distance(cuv, c);
+      float age = fx.z;
+      float fade = 1.0 - age;
+      if (fx.w < 0.5) {
+        // RIPPLE: soft, thin, expanding ring.
+        float ring = exp(-pow((dist - age * 0.6) * 9.0, 2.0));
+        col += uFxColor[i] * ring * fade;
+      } else if (fx.w < 1.5) {
+        // BLAST: bright filled bloom.
+        col += uFxColor[i] * exp(-dist * dist * 45.0) * fade * 2.0;
+      } else {
+        // DISRUPTION: sharp bright shock edge (the warp is in fxDisplace).
+        float shell = exp(-pow((dist - age * 0.8) * 11.0, 2.0));
+        col += uFxColor[i] * shell * fade * 1.3;
+      }
+    }
+    return col;
+  }
+`;
+
