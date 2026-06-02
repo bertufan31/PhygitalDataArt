@@ -16,7 +16,7 @@ import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
 import { EventTypes } from '../../core/events.js';
 import { NOISE_GLSL } from '../shaderLib.js';
-import { EffectField, KIND_ENERGY } from '../effects.js';
+import { EffectField, KIND_ENERGY, Eased } from '../effects.js';
 
 const COUNT = 120000;
 const FX_MAX = 8;
@@ -91,8 +91,8 @@ const vertexShader = /* glsl */ `
     }
 
     vColor = mix(baseCol, uTint, uTintAmount * 0.5);
-    vColor *= (0.30 + 0.5 * uEnergy);
-    vColor += fxCol;
+    vColor *= (0.45 + 0.30 * uEnergy);   // gentle, eased global response
+    vColor += fxCol;                      // local effect colour (the visible reaction)
     vColor *= (1.0 + bright);
 
     vAlpha = smoothstep(0.0, 0.1, phase) * smoothstep(1.0, 0.82, phase);
@@ -120,10 +120,10 @@ export class ParticleFlow extends BaseArt {
     this.renderer = ctx.renderer;
     this.size = ctx.size;
     this.time = 0;
-    this.energy = BASE_ENERGY;
     this.paletteShift = 0;
     this.tint = new THREE.Color('#ffffff');
-    this.tintAmount = 0;
+    this.energy = new Eased(BASE_ENERGY, { max: 3, decay: 0.6, rise: 1.8 });
+    this.tintAmount = new Eased(0, { max: 0.8, decay: 0.35, rise: 2.2 });
     this.fx = new EffectField(FX_MAX);
 
     const positions = new Float32Array(COUNT * 3);
@@ -146,7 +146,7 @@ export class ParticleFlow extends BaseArt {
     this.uniforms = {
       uTime: { value: 0 },
       uAspect: { value: aspect },
-      uEnergy: { value: this.energy },
+      uEnergy: { value: BASE_ENERGY },
       uPaletteShift: { value: 0 },
       uTint: { value: this.tint.clone() },
       uTintAmount: { value: 0 },
@@ -185,25 +185,23 @@ export class ParticleFlow extends BaseArt {
 
   onEvent(event) {
     const fx = this.fx.spawn(event);
-    if (fx) this.energy += KIND_ENERGY[fx.kind];
+    if (fx) this.energy.bump(KIND_ENERGY[fx.kind]);
     if (event.type === EventTypes.FLAVOUR_SOLD) {
       this.tint.set(event.data?.color || '#ffffff');
-      this.tintAmount = Math.min(0.8, this.tintAmount + 0.5);
+      this.tintAmount.set(0.8);
     }
   }
 
   update(dt) {
     this.time += dt;
-    this.energy += (BASE_ENERGY - this.energy) * Math.min(1, dt * 0.6);
-    this.tintAmount += (0 - this.tintAmount) * Math.min(1, dt * 0.35);
     this.paletteShift += dt * 0.01;
     this.fx.update(dt);
 
     this.uniforms.uTime.value = this.time;
-    this.uniforms.uEnergy.value = this.energy;
+    this.uniforms.uEnergy.value = this.energy.update(dt);
     this.uniforms.uPaletteShift.value = this.paletteShift;
     this.uniforms.uTint.value.copy(this.tint);
-    this.uniforms.uTintAmount.value = this.tintAmount;
+    this.uniforms.uTintAmount.value = this.tintAmount.update(dt);
     this.uniforms.uFxCount.value = this.fx.write(this.uniforms.uFxPos.value, this.uniforms.uFxColor.value);
 
     this.renderer.setRenderTarget(this.renderTarget);

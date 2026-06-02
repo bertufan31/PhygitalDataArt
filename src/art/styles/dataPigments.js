@@ -16,7 +16,7 @@ import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
 import { EventTypes } from '../../core/events.js';
 import { NOISE_GLSL, FX_GLSL } from '../shaderLib.js';
-import { EffectField, KIND_ENERGY } from '../effects.js';
+import { EffectField, KIND_ENERGY, Eased } from '../effects.js';
 
 const FX_MAX = 16;
 const BASE_ENERGY = 0.55;
@@ -80,17 +80,17 @@ export class DataPigments extends BaseArt {
     this.renderer = ctx.renderer;
     this.size = ctx.size;
     this.time = 0;
-    this.energy = BASE_ENERGY;
     this.paletteShift = 0;
     this.tint = new THREE.Color('#ffffff');
-    this.tintAmount = 0;
+    this.energy = new Eased(BASE_ENERGY, { max: 3, decay: 0.6, rise: 2.0 });
+    this.tintAmount = new Eased(0, { max: 0.85, decay: 0.35, rise: 2.5 });
     this.fx = new EffectField(FX_MAX);
 
     const aspect = this.size.width / this.size.height;
     this.uniforms = {
       uTime: { value: 0 },
       uAspect: { value: aspect },
-      uEnergy: { value: this.energy },
+      uEnergy: { value: BASE_ENERGY },
       uWarp: { value: 1.3 },
       uPaletteShift: { value: 0 },
       uTint: { value: this.tint.clone() },
@@ -123,26 +123,25 @@ export class DataPigments extends BaseArt {
 
   onEvent(event) {
     const fx = this.fx.spawn(event);
-    if (fx) this.energy += KIND_ENERGY[fx.kind];
+    if (fx) this.energy.bump(KIND_ENERGY[fx.kind]);
     if (event.type === EventTypes.FLAVOUR_SOLD) {
       this.tint.set(event.data?.color || '#ffffff');
-      this.tintAmount = Math.min(0.85, this.tintAmount + 0.5);
+      this.tintAmount.set(0.85);
     }
   }
 
   update(dt) {
     this.time += dt;
-    this.energy += (BASE_ENERGY - this.energy) * Math.min(1, dt * 0.6);
-    this.tintAmount += (0 - this.tintAmount) * Math.min(1, dt * 0.35);
     this.paletteShift += dt * 0.01;
     this.fx.update(dt);
+    const e = this.energy.update(dt);
 
     this.uniforms.uTime.value = this.time;
-    this.uniforms.uEnergy.value = this.energy;
-    this.uniforms.uWarp.value = 1.25 + this.energy * 0.55;
+    this.uniforms.uEnergy.value = e;
+    this.uniforms.uWarp.value = 1.25 + e * 0.55;
     this.uniforms.uPaletteShift.value = this.paletteShift;
     this.uniforms.uTint.value.copy(this.tint);
-    this.uniforms.uTintAmount.value = this.tintAmount;
+    this.uniforms.uTintAmount.value = this.tintAmount.update(dt);
     this.uniforms.uFxCount.value = this.fx.write(this.uniforms.uFxPos.value, this.uniforms.uFxColor.value);
 
     this.renderer.setRenderTarget(this.renderTarget);

@@ -39,6 +39,34 @@ export function effectForEvent(event) {
 export const KIND_ENERGY = [0.12, 0.42, 0.3]; // ripple, blast, disruption
 
 /**
+ * A smoothly eased scalar. Events `bump()` a target; the target decays back to a
+ * baseline and the visible `value` eases toward the target. This is what keeps a
+ * new event from instantly flashing the whole field — global responses (overall
+ * energy, flavour tint) rise and fall gradually instead of popping.
+ */
+export class Eased {
+  constructor(base = 0, { rise = 2.0, decay = 0.5, max = Infinity } = {}) {
+    this.base = base;
+    this.max = max;
+    this.rise = rise; // how fast value chases target
+    this.decay = decay; // how fast target falls back to base
+    this.value = base;
+    this.target = base;
+  }
+  bump(amount) {
+    this.target = Math.min(this.max, this.target + amount);
+  }
+  set(v) {
+    this.target = Math.min(this.max, v);
+  }
+  update(dt) {
+    this.target += (this.base - this.target) * Math.min(1, dt * this.decay);
+    this.value += (this.target - this.value) * Math.min(1, dt * this.rise);
+    return this.value;
+  }
+}
+
+/**
  * Holds live effects and writes them into shader uniform arrays as
  * vec4(x, y, ageNorm, kind) + matching colours. Shared by every style so the
  * 3-distinct-effects principle is implemented once.
