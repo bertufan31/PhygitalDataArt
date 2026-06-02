@@ -18,6 +18,7 @@ const DEFAULT_STATE = {
   artId: 'data-pigments', // active art option
   viewId: 'head-on', // active mockup camera view
   targetId: 'flat', // 'flat' | 'prism' display target
+  frameStyle: 'gallery', // picture-frame style (see viewManager FRAME_STYLES)
   frame: { w: 160, h: 90 }, // physical frame size in cm (editable in the panel)
   prism: { cols: 96, rows: 54 }, // LED-prism grid resolution (editable)
   sim: { running: true, rate: 1.0 }, // fake-data engine on/off + speed multiplier
@@ -62,6 +63,9 @@ export function applyCommand(state, cmd) {
       break;
     case CommandTypes.SET_TARGET:
       state.targetId = cmd.data.targetId;
+      break;
+    case CommandTypes.SET_FRAME_STYLE:
+      state.frameStyle = cmd.data.frameStyle;
       break;
     case CommandTypes.SET_FRAME:
       state.frame = { ...state.frame, ...cmd.data };

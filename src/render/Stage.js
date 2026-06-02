@@ -38,6 +38,7 @@ export class Stage {
 
     this._artSize = this._computeArtSize(state.frame);
     this.views.setAspect(this._frameAspect());
+    this.views.setFrameStyle(state.frameStyle || 'gallery');
 
     this.setArt(state.artId);
     this.setTarget(state.targetId);
@@ -85,6 +86,11 @@ export class Stage {
   setView(viewId) {
     this.views.setView(viewId);
     this.state.viewId = viewId;
+  }
+
+  setFrameStyle(styleId) {
+    this.views.setFrameStyle(styleId);
+    this.state.frameStyle = styleId;
   }
 
   setFrame(frame) {

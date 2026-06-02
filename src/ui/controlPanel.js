@@ -21,6 +21,13 @@ const TARGETS = [
   ['flat', 'Flat screen'],
   ['prism', 'LED prisms'],
 ];
+const FRAMES = [
+  ['niche', 'Niche'],
+  ['gallery', 'Gallery'],
+  ['dark', 'Dark'],
+  ['metallic', 'Metallic'],
+  ['none', 'None'],
+];
 const RATIO_PRESETS = [
   ['16:9', 160, 90],
   ['3:2', 150, 100],
@@ -50,6 +57,7 @@ export function initControlPanel({ root, state, dispatch, fire }) {
   const artBtns = new Map();
   const viewBtns = new Map();
   const targetBtns = new Map();
+  const frameBtns = new Map();
   const flavourBtns = new Map();
 
   // -- Art options -------------------------------------------------------
@@ -86,6 +94,18 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     });
     targetBtns.set(id, b);
     targetRow.append(b);
+  }
+
+  // -- Frame style -------------------------------------------------------
+  const frameRow = el('div', { class: 'btn-grid' });
+  for (const [id, label] of FRAMES) {
+    const b = el('button', {
+      class: 'opt opt--sm',
+      text: label,
+      onclick: () => dispatch(makeCommand(CommandTypes.SET_FRAME_STYLE, { frameStyle: id })),
+    });
+    frameBtns.set(id, b);
+    frameRow.append(b);
   }
 
   // -- Live data / DJ pads ----------------------------------------------
@@ -189,6 +209,7 @@ export function initControlPanel({ root, state, dispatch, fire }) {
       section('Art options', artRow),
       section('Mockup view', viewRow),
       section('Display target', targetRow),
+      section('Frame style', frameRow),
       section('Simulator', simBody),
       section('Live data', el('div', { class: 'stack' }, [padRow, flavourGrid])),
       section('Frame & grid', frameBody),
@@ -205,6 +226,7 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     setActive(artBtns, state.artId);
     setActive(viewBtns, state.viewId);
     setActive(targetBtns, state.targetId);
+    setActive(frameBtns, state.frameStyle);
     simBtn.textContent = state.sim.running ? '■ Pause data feed' : '▶ Resume data feed';
     simBtn.classList.toggle('active', state.sim.running);
     rateSlider.value = String(state.sim.rate);

@@ -44,6 +44,9 @@ function applyCommandLocally(cmd) {
     case CommandTypes.SET_TARGET:
       stage.setTarget(state.targetId);
       break;
+    case CommandTypes.SET_FRAME_STYLE:
+      stage.setFrameStyle(state.frameStyle);
+      break;
     case CommandTypes.SET_FRAME:
       stage.setFrame(state.frame);
       break;
