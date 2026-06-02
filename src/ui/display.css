@@ -61,6 +61,10 @@ body {
   border-radius: 12px;
   backdrop-filter: blur(8px);
 }
+/* The [hidden] attribute must win over display:flex above. */
+.pda-ham__panel[hidden] {
+  display: none;
+}
 
 .pda-ham__group {
   display: flex;
