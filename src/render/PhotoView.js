@@ -12,12 +12,15 @@ import * as THREE from 'three';
 import storeUrl from '../assets/store.jpg';
 
 // Wall-niche corners in PHOTO space (0..1, origin top-left): TL, TR, BR, BL.
-// Tuned to the white illuminated niche on the left wall of the store photo.
+// Mapped to the white illuminated lightbox niche on the left wall, as a
+// landscape piece (matches the placement the user drew). The camera sits
+// centre-right, so the niche's right edge is nearer → slightly taller; the
+// left edge is farther → slightly shorter. These give it true wall perspective.
 const DEFAULT_CORNERS = [
-  [0.027, 0.228],  // TL
-  [0.356, 0.223],  // TR
-  [0.358, 0.628],  // BR
-  [0.027, 0.633],  // BL
+  [0.050, 0.345],  // TL
+  [0.333, 0.330],  // TR
+  [0.335, 0.628],  // BR
+  [0.050, 0.612],  // BL
 ];
 
 const artVertex = /* glsl */ `
