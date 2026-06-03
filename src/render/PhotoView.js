@@ -2,7 +2,7 @@
 // PhotoView — the "store photo" mockup (View 2).
 //
 // Renders the real boutique photo full-frame (letterboxed) and composites the
-// live artwork onto the arrowed wall niche with correct perspective, using a
+// live artwork onto the white illuminated niche on the left wall, using a
 // homography quad (per-vertex projective weights) so the art sits on the wall
 // at the right angle and "reads from far". The art texture is the graded output,
 // so it reacts to data and respects the colour pickers like everywhere else.
@@ -12,12 +12,12 @@ import * as THREE from 'three';
 import storeUrl from '../assets/store.jpg';
 
 // Wall-niche corners in PHOTO space (0..1, origin top-left): TL, TR, BR, BL.
-// Tuned to the arrowed white niche; adjustable via setCorners().
+// Tuned to the white illuminated niche on the left wall of the store photo.
 const DEFAULT_CORNERS = [
-  [0.690, 0.345],
-  [0.818, 0.360],
-  [0.818, 0.545],
-  [0.690, 0.560],
+  [0.027, 0.228],  // TL
+  [0.356, 0.223],  // TR
+  [0.358, 0.628],  // BR
+  [0.027, 0.633],  // BL
 ];
 
 const artVertex = /* glsl */ `
@@ -50,7 +50,7 @@ export class PhotoView {
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#000000');
     this.camera = new THREE.Camera();
-    this.photoAspect = 1.5;
+    this.photoAspect = 1.305;
     this.canvasAspect = 16 / 9;
     this.corners = DEFAULT_CORNERS;
 
@@ -58,29 +58,15 @@ export class PhotoView {
     this.photoMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.photoMat);
     this.scene.add(this.photoMesh);
 
-    // Load into a canvas so we can paint over the baked-in annotation arrow.
     const img = new Image();
     img.onload = () => {
-      const w = img.width, h = img.height;
-      const canvas = document.createElement('canvas');
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      const wall = ctx.getImageData(Math.round(0.71 * w), Math.round(0.33 * h), 1, 1).data;
-      ctx.strokeStyle = `rgb(${wall[0]},${wall[1]},${wall[2]})`;
-      ctx.lineCap = 'round';
-      ctx.lineWidth = h * 0.06;
-      ctx.beginPath();
-      ctx.moveTo(0.650 * w, 0.493 * h);
-      ctx.lineTo(0.782 * w, 0.400 * h);
-      ctx.stroke();
-      const tex = new THREE.CanvasTexture(canvas);
+      const tex = new THREE.Texture(img);
       tex.colorSpace = THREE.SRGBColorSpace;
+      tex.needsUpdate = true;
       this.photoMat.map = tex;
       this.photoMat.color.set(0xffffff);
       this.photoMat.needsUpdate = true;
-      this.photoAspect = w / h;
+      this.photoAspect = img.width / img.height;
       this.layout();
     };
     img.src = storeUrl;
