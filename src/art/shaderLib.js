@@ -131,9 +131,9 @@ export const EMBLEM_GLSL = /* glsl */ `
     return -length(p) * sign(p.y);
   }
   float emblemDist(vec2 p){
-    float tri = sdTriEq(vec2(p.x, p.y - 0.05), 0.275) - 0.175; // rounded triangle, apex up
-    float circ = length(p - vec2(0.0, -0.05)) - 0.295;          // circular hole
-    return max(tri, -circ);                                      // ring = outer ∖ inner
+    float tri = sdTriEq(vec2(p.x, p.y - 0.04), 0.28) - 0.175; // rounded triangle, apex up
+    float circ = length(p - vec2(0.0, -0.02)) - 0.335;         // centred circular hole
+    return max(tri, -circ);                                     // ring = outer ∖ inner
   }
   float emblemMask(vec2 p){
     float d = emblemDist(p);

@@ -22,8 +22,8 @@ function sdTriEq(px, py, r) {
 
 /** Signed distance to the emblem ring (centred space, y up); < 0 inside. */
 export function emblemDist(x, y) {
-  const tri = sdTriEq(x, y - 0.05, 0.275) - 0.175;
-  const circ = Math.hypot(x, y + 0.05) - 0.295;
+  const tri = sdTriEq(x, y - 0.04, 0.28) - 0.175;
+  const circ = Math.hypot(x, y + 0.02) - 0.335;
   return Math.max(tri, -circ);
 }
 
