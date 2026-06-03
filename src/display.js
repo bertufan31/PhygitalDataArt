@@ -53,6 +53,9 @@ function applyCommandLocally(cmd) {
     case CommandTypes.SET_PRISM:
       stage.setPrism(state.prism);
       break;
+    case CommandTypes.SET_ART_PARAM:
+      stage.setArtParam(cmd.data.artId);
+      break;
     case CommandTypes.SET_SIM:
       sim.setRate(state.sim.rate);
       if (state.sim.running) sim.start(state.sim.rate);

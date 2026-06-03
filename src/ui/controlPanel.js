@@ -10,7 +10,8 @@
 // ---------------------------------------------------------------------------
 
 import { CommandTypes, EventTypes, makeCommand, makeEvent, Flavours, Products } from '../core/events.js';
-import { listArts } from '../art/registry.js';
+import { listArts, getArt } from '../art/registry.js';
+import { mergedArtParams, colorParamDefs } from '../art/params.js';
 
 const VIEWS = [
   ['head-on', 'View 1 · Head-on'],
@@ -189,11 +190,49 @@ export function initControlPanel({ root, state, dispatch, fire }) {
   const pHeight = rangeField('Height', 0.3, 1.0, 0.05, (v) => dispatch(makeCommand(CommandTypes.SET_PRISM, { heightFill: v })));
   const pDepth = rangeField('Base depth', 0.02, 0.4, 0.01, (v) => dispatch(makeCommand(CommandTypes.SET_PRISM, { depth: v })));
   const pRise = rangeField('Max rise', 0.0, 1.0, 0.02, (v) => dispatch(makeCommand(CommandTypes.SET_PRISM, { rise: v })));
+  const pSmooth = rangeField('Smoothing', 0.02, 1.0, 0.02, (v) => dispatch(makeCommand(CommandTypes.SET_PRISM, { smoothing: v })));
   const prismBody = el('div', { class: 'stack' }, [
     el('div', { class: 'field-row' }, [pCols.field, pRows.field]),
     el('div', { class: 'field-row' }, [pWidth.field, pHeight.field]),
     el('div', { class: 'field-row' }, [pDepth.field, pRise.field]),
+    el('div', { class: 'field-row' }, [pSmooth.field]),
   ]);
+
+  // -- Per-art colour + style settings (rebuilt when the active art changes) --
+  const colourBody = el('div', { class: 'stack' });
+  const artSettingsBody = el('div', { class: 'stack' });
+  const artSettingsSection = section('Style settings', artSettingsBody);
+
+  const fmtParam = (def, v) => {
+    const n = parseFloat(v);
+    return def.max <= 1 ? n.toFixed(2) : String(Math.round(n));
+  };
+  const makeParamField = (def, value, artId) => {
+    const commit = (v) => dispatch(makeCommand(CommandTypes.SET_ART_PARAM, { artId, key: def.key, value: v }));
+    if (def.type === 'color') {
+      const input = el('input', { type: 'color', class: 'color-input', value, oninput: (e) => commit(e.target.value) });
+      return el('label', { class: 'field' }, [el('span', { text: def.label }), input]);
+    }
+    const isNum = def.type === 'number';
+    const valEl = el('span', { class: 'rate-label' });
+    const input = el('input', {
+      type: isNum ? 'number' : 'range',
+      min: String(def.min), max: String(def.max), step: String(def.step ?? (isNum ? 1 : 0.01)), value: String(value),
+      oninput: isNum ? undefined : (e) => { valEl.textContent = fmtParam(def, e.target.value); commit(parseFloat(e.target.value)); },
+      onchange: isNum ? (e) => commit(clampNum(e.target.value, def.min, def.max, value)) : undefined,
+    });
+    if (!isNum) valEl.textContent = fmtParam(def, value);
+    return el('label', { class: 'field' }, isNum ? [el('span', { text: def.label }), input] : [el('span', { text: def.label }), input, valEl]);
+  };
+  let lastArtId = null;
+  function rebuildArtUI() {
+    const ArtClass = getArt(state.artId);
+    const params = mergedArtParams(state, state.artId, ArtClass);
+    colourBody.replaceChildren(...colorParamDefs().map((def) => makeParamField(def, params[def.key], state.artId)));
+    const defs = (ArtClass && ArtClass.params) || [];
+    artSettingsBody.replaceChildren(...defs.map((def) => makeParamField(def, params[def.key], state.artId)));
+    artSettingsSection.style.display = defs.length ? '' : 'none';
+  }
 
   // -- Live feed ---------------------------------------------------------
   const feed = el('ul', { class: 'feed' });
@@ -209,6 +248,8 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     ]),
     el('div', { class: 'panel-grid' }, [
       section('Art options', artRow),
+      section('Colour', colourBody),
+      artSettingsSection,
       section('Mockup view', viewRow),
       section('Display target', targetRow),
       section('Frame style', frameRow),
@@ -242,6 +283,8 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     pHeight.input.value = String(state.prism.heightFill); pHeight.val.textContent = Math.round(state.prism.heightFill * 100) + '%';
     pDepth.input.value = String(state.prism.depth); pDepth.val.textContent = Number(state.prism.depth).toFixed(2);
     pRise.input.value = String(state.prism.rise); pRise.val.textContent = Number(state.prism.rise).toFixed(2);
+    pSmooth.input.value = String(state.prism.smoothing); pSmooth.val.textContent = Number(state.prism.smoothing).toFixed(2);
+    if (state.artId !== lastArtId) { lastArtId = state.artId; rebuildArtUI(); }
   }
 
   function flash(event) {

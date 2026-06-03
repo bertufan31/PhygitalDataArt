@@ -19,6 +19,11 @@ export class BaseArt {
   static id = 'base';
   /** Human-readable label shown on the control-panel button. */
   static label = 'Base';
+  /** Optional style-specific controls, e.g. [{ key, type:'range'|'number'|'color', label, min, max, step, default }]. */
+  static params = [];
+
+  /** Apply current per-art parameter values (called on init and on change). */
+  setParams(_params) {}
 
   /**
    * Create GPU resources.

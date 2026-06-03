@@ -29,6 +29,7 @@ export const CommandTypes = {
   SET_FRAME: 'set_frame',
   SET_FRAME_STYLE: 'set_frame_style',
   SET_PRISM: 'set_prism',
+  SET_ART_PARAM: 'set_art_param',
   SET_SIM: 'set_sim',
   REQUEST_STATE: 'request_state', // a window asks the running display for current state
   SYNC_STATE: 'sync_state', // the display replies with a full state snapshot

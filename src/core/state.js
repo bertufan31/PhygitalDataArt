@@ -20,7 +20,8 @@ const DEFAULT_STATE = {
   targetId: 'flat', // 'flat' | 'prism' display target
   frameStyle: 'gallery', // picture-frame style (see viewManager FRAME_STYLES)
   frame: { w: 160, h: 90 }, // physical frame size in cm (editable in the panel)
-  prism: { cols: 96, rows: 54, widthFill: 0.85, heightFill: 0.85, depth: 0.12, rise: 0.32 }, // LED-prism grid + geometry
+  prism: { cols: 96, rows: 54, widthFill: 0.85, heightFill: 0.85, depth: 0.12, rise: 0.32, smoothing: 0.32 }, // LED-prism grid + geometry + spring time
+  artParams: {}, // per-art settings: { [artId]: { key: value } } (colours + style knobs)
   sim: { running: true, rate: 1.0 }, // fake-data engine on/off + speed multiplier
 };
 
@@ -32,8 +33,18 @@ export function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
-      // Merge over defaults so new fields added later don't break old saves.
-      return { ...structuredClone(DEFAULT_STATE), ...JSON.parse(raw) };
+      // Merge over defaults (incl. one level into nested objects) so new fields
+      // added later don't break old saves.
+      const saved = JSON.parse(raw);
+      const base = structuredClone(DEFAULT_STATE);
+      return {
+        ...base,
+        ...saved,
+        frame: { ...base.frame, ...saved.frame },
+        prism: { ...base.prism, ...saved.prism },
+        sim: { ...base.sim, ...saved.sim },
+        artParams: { ...(saved.artParams || {}) },
+      };
     }
   } catch {
     /* ignore corrupt/unavailable storage */
@@ -73,6 +84,11 @@ export function applyCommand(state, cmd) {
     case CommandTypes.SET_PRISM:
       state.prism = { ...state.prism, ...cmd.data };
       break;
+    case CommandTypes.SET_ART_PARAM: {
+      const { artId, key, value } = cmd.data;
+      state.artParams = { ...state.artParams, [artId]: { ...state.artParams[artId], [key]: value } };
+      break;
+    }
     case CommandTypes.SET_SIM:
       state.sim = { ...state.sim, ...cmd.data };
       break;

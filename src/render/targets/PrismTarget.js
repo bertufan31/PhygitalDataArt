@@ -70,10 +70,9 @@ const prismFragment = /* glsl */ `
   }
 `;
 
-const EASE_TAU = 0.32; // seconds for the wall to settle (spring inertia)
-
 export class PrismTarget {
   constructor({ aspect, prism }) {
+    this.smoothing = prism.smoothing ?? 0.32; // seconds for the wall to settle
     const cols = Math.max(1, prism.cols | 0);
     const rows = Math.max(1, prism.rows | 0);
     const widthFill = prism.widthFill ?? 0.85;
@@ -163,7 +162,8 @@ export class PrismTarget {
   // Called each frame by the Stage: ease the buffer toward the current artwork.
   update(renderer, dt) {
     if (!this._srcTex) return;
-    this.computeMat.uniforms.uMix.value = this._primed ? Math.min(1, dt / EASE_TAU) : 1;
+    const tau = Math.max(0.02, this.smoothing);
+    this.computeMat.uniforms.uMix.value = this._primed ? Math.min(1, dt / tau) : 1;
     this.computeMat.uniforms.uPrev.value = this._prev.texture;
     renderer.setRenderTarget(this._next);
     renderer.render(this.computeScene, this.computeCamera);

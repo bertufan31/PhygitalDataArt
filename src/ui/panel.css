@@ -248,6 +248,15 @@ body {
   color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
+.field .color-input {
+  width: 100%;
+  height: 34px;
+  padding: 2px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
 
 /* --- Feed -------------------------------------------------------------- */
 .feed {
