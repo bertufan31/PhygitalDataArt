@@ -7,4 +7,7 @@ import './slicedLight.js';
 import './particleFlow.js';
 import './dataThreads.js';
 import './pigmentPlumes.js';
+import './keyParticles.js';
+import './keyAura.js';
+import './keyPattern.js';
 import './placeholderField.js';
