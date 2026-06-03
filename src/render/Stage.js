@@ -122,6 +122,7 @@ export class Stage {
       this._raf = requestAnimationFrame(loop);
       const dt = Math.min(this.clock.getDelta(), 0.1); // clamp after tab-switch stalls
       if (this.art) this.art.update(dt); // renders art into its own target
+      if (this.target && this.target.update) this.target.update(this.renderer, dt); // prism easing pass
       this.views.update(dt);
       this.renderer.setRenderTarget(null);
       this.renderer.render(this.scene, this.views.camera);

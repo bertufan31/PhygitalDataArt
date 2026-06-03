@@ -20,7 +20,7 @@ const DEFAULT_STATE = {
   targetId: 'flat', // 'flat' | 'prism' display target
   frameStyle: 'gallery', // picture-frame style (see viewManager FRAME_STYLES)
   frame: { w: 160, h: 90 }, // physical frame size in cm (editable in the panel)
-  prism: { cols: 96, rows: 54 }, // LED-prism grid resolution (editable)
+  prism: { cols: 96, rows: 54, widthFill: 0.85, heightFill: 0.85, depth: 0.12, rise: 0.32 }, // LED-prism grid + geometry
   sim: { running: true, rate: 1.0 }, // fake-data engine on/off + speed multiplier
 };
 

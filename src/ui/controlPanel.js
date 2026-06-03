@@ -160,32 +160,39 @@ export function initControlPanel({ root, state, dispatch, fire }) {
       onclick: () => dispatch(makeCommand(CommandTypes.SET_FRAME, { w, h })),
     }));
   }
-  const frameW = el('input', {
-    type: 'number', min: '10', max: '1000',
-    onchange: (e) => dispatch(makeCommand(CommandTypes.SET_FRAME, { w: clampNum(e.target.value, 10, 1000, state.frame.w) })),
-  });
-  const frameH = el('input', {
-    type: 'number', min: '10', max: '1000',
-    onchange: (e) => dispatch(makeCommand(CommandTypes.SET_FRAME, { h: clampNum(e.target.value, 10, 1000, state.frame.h) })),
-  });
-  const prismCols = el('input', {
-    type: 'number', min: '8', max: '200',
-    onchange: (e) => dispatch(makeCommand(CommandTypes.SET_PRISM, { cols: clampNum(e.target.value, 8, 200, state.prism.cols) })),
-  });
-  const prismRows = el('input', {
-    type: 'number', min: '8', max: '200',
-    onchange: (e) => dispatch(makeCommand(CommandTypes.SET_PRISM, { rows: clampNum(e.target.value, 8, 200, state.prism.rows) })),
-  });
-  const frameBody = el('div', { class: 'stack' }, [
-    ratioRow,
-    el('div', { class: 'field-row' }, [
-      el('label', { class: 'field' }, [el('span', { text: 'Frame W (cm)' }), frameW]),
-      el('label', { class: 'field' }, [el('span', { text: 'Frame H (cm)' }), frameH]),
-    ]),
-    el('div', { class: 'field-row' }, [
-      el('label', { class: 'field' }, [el('span', { text: 'Prism cols' }), prismCols]),
-      el('label', { class: 'field' }, [el('span', { text: 'Prism rows' }), prismRows]),
-    ]),
+  // Small field builders.
+  const numField = (labelText, min, max, getVal, onCommit) => {
+    const input = el('input', {
+      type: 'number', min: String(min), max: String(max),
+      onchange: (e) => onCommit(clampNum(e.target.value, min, max, getVal())),
+    });
+    return { input, field: el('label', { class: 'field' }, [el('span', { text: labelText }), input]) };
+  };
+  const rangeField = (labelText, min, max, step, onInput) => {
+    const val = el('span', { class: 'rate-label' });
+    const input = el('input', {
+      type: 'range', min: String(min), max: String(max), step: String(step),
+      oninput: (e) => onInput(parseFloat(e.target.value)),
+    });
+    return { input, val, field: el('label', { class: 'field' }, [el('span', { text: labelText }), input, val]) };
+  };
+
+  // Frame size (cm) + ratio presets.
+  const fW = numField('Frame W (cm)', 10, 1000, () => state.frame.w, (v) => dispatch(makeCommand(CommandTypes.SET_FRAME, { w: v })));
+  const fH = numField('Frame H (cm)', 10, 1000, () => state.frame.h, (v) => dispatch(makeCommand(CommandTypes.SET_FRAME, { h: v })));
+  const frameSizeBody = el('div', { class: 'stack' }, [ratioRow, el('div', { class: 'field-row' }, [fW.field, fH.field])]);
+
+  // LED-prism grid + geometry.
+  const pCols = numField('Cols', 8, 220, () => state.prism.cols, (v) => dispatch(makeCommand(CommandTypes.SET_PRISM, { cols: v })));
+  const pRows = numField('Rows', 8, 220, () => state.prism.rows, (v) => dispatch(makeCommand(CommandTypes.SET_PRISM, { rows: v })));
+  const pWidth = rangeField('Width', 0.3, 1.0, 0.05, (v) => dispatch(makeCommand(CommandTypes.SET_PRISM, { widthFill: v })));
+  const pHeight = rangeField('Height', 0.3, 1.0, 0.05, (v) => dispatch(makeCommand(CommandTypes.SET_PRISM, { heightFill: v })));
+  const pDepth = rangeField('Base depth', 0.02, 0.4, 0.01, (v) => dispatch(makeCommand(CommandTypes.SET_PRISM, { depth: v })));
+  const pRise = rangeField('Max rise', 0.0, 1.0, 0.02, (v) => dispatch(makeCommand(CommandTypes.SET_PRISM, { rise: v })));
+  const prismBody = el('div', { class: 'stack' }, [
+    el('div', { class: 'field-row' }, [pCols.field, pRows.field]),
+    el('div', { class: 'field-row' }, [pWidth.field, pHeight.field]),
+    el('div', { class: 'field-row' }, [pDepth.field, pRise.field]),
   ]);
 
   // -- Live feed ---------------------------------------------------------
@@ -207,7 +214,8 @@ export function initControlPanel({ root, state, dispatch, fire }) {
       section('Frame style', frameRow),
       section('Simulator', simBody),
       section('Live data', el('div', { class: 'stack' }, [padRow, flavourNote, flavourGrid])),
-      section('Frame & grid', frameBody),
+      section('Frame size', frameSizeBody),
+      section('LED prisms', prismBody),
     ]),
     section('Live feed', feed),
   );
@@ -226,10 +234,14 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     simBtn.classList.toggle('active', state.sim.running);
     rateSlider.value = String(state.sim.rate);
     rateLabel.textContent = `${state.sim.rate.toFixed(2)}×`;
-    if (document.activeElement !== frameW) frameW.value = String(state.frame.w);
-    if (document.activeElement !== frameH) frameH.value = String(state.frame.h);
-    if (document.activeElement !== prismCols) prismCols.value = String(state.prism.cols);
-    if (document.activeElement !== prismRows) prismRows.value = String(state.prism.rows);
+    if (document.activeElement !== fW.input) fW.input.value = String(state.frame.w);
+    if (document.activeElement !== fH.input) fH.input.value = String(state.frame.h);
+    if (document.activeElement !== pCols.input) pCols.input.value = String(state.prism.cols);
+    if (document.activeElement !== pRows.input) pRows.input.value = String(state.prism.rows);
+    pWidth.input.value = String(state.prism.widthFill); pWidth.val.textContent = Math.round(state.prism.widthFill * 100) + '%';
+    pHeight.input.value = String(state.prism.heightFill); pHeight.val.textContent = Math.round(state.prism.heightFill * 100) + '%';
+    pDepth.input.value = String(state.prism.depth); pDepth.val.textContent = Number(state.prism.depth).toFixed(2);
+    pRise.input.value = String(state.prism.rise); pRise.val.textContent = Number(state.prism.rise).toFixed(2);
   }
 
   function flash(event) {
