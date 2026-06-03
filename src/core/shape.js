@@ -6,24 +6,31 @@
 // CPU side, used by the particle style to place points inside the emblem.
 // ---------------------------------------------------------------------------
 
-function sdTriEq(px, py, r) {
-  const k = Math.sqrt(3.0);
-  px = Math.abs(px) - r;
-  py = py + r / k;
-  if (px + k * py > 0.0) {
-    const nx = (px - k * py) / 2.0;
-    const ny = (-k * px - py) / 2.0;
-    px = nx;
-    py = ny;
-  }
-  px -= Math.min(0.0, Math.max(-2.0 * r, px));
-  return -Math.hypot(px, py) * Math.sign(py || 1);
+function sdTriangle(px, py, ax, ay, bx, by, cx, cy) {
+  const e0x = bx - ax, e0y = by - ay;
+  const e1x = cx - bx, e1y = cy - by;
+  const e2x = ax - cx, e2y = ay - cy;
+  const v0x = px - ax, v0y = py - ay;
+  const v1x = px - bx, v1y = py - by;
+  const v2x = px - cx, v2y = py - cy;
+  const proj = (vx, vy, ex, ey) => {
+    const t = Math.min(1, Math.max(0, (vx * ex + vy * ey) / (ex * ex + ey * ey)));
+    return [vx - ex * t, vy - ey * t];
+  };
+  const [q0x, q0y] = proj(v0x, v0y, e0x, e0y);
+  const [q1x, q1y] = proj(v1x, v1y, e1x, e1y);
+  const [q2x, q2y] = proj(v2x, v2y, e2x, e2y);
+  const s = Math.sign(e0x * e2y - e0y * e2x);
+  // Componentwise min (matches the GLSL): nearest distance² and inside/outside sign.
+  const dx = Math.min(q0x * q0x + q0y * q0y, q1x * q1x + q1y * q1y, q2x * q2x + q2y * q2y);
+  const dy = Math.min(s * (v0x * e0y - v0y * e0x), s * (v1x * e1y - v1y * e1x), s * (v2x * e2y - v2y * e2x));
+  return -Math.sqrt(dx) * Math.sign(dy || 1);
 }
 
 /** Signed distance to the emblem ring (centred space, y up); < 0 inside. */
 export function emblemDist(x, y) {
-  const tri = sdTriEq(x, y - 0.04, 0.28) - 0.175;
-  const circ = Math.hypot(x, y + 0.02) - 0.335;
+  const tri = sdTriangle(x, y, 0.0, 0.29, -0.34, -0.255, 0.34, -0.255) - 0.15;
+  const circ = Math.hypot(x, y) - 0.28;
   return Math.max(tri, -circ);
 }
 
