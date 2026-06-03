@@ -13,7 +13,7 @@
 import * as THREE from 'three';
 import { getArt } from '../art/registry.js';
 import { mergedArtParams } from '../art/params.js';
-import { FlatTarget } from './targets/FlatTarget.js';
+import { FlatTarget, FRAME_HEIGHT } from './targets/FlatTarget.js';
 import { PrismTarget } from './targets/PrismTarget.js';
 import { ColorGrade } from './ColorGrade.js';
 import { PhotoView } from './PhotoView.js';
@@ -42,6 +42,18 @@ export class Stage {
     this.grade = new ColorGrade(this._artSize);
     this.photoView = new PhotoView(); // View 2 store-photo composite
     this.photoView.setArtTexture(this.grade.texture);
+
+    // For the store mockup we capture the active display TARGET (flat plane or
+    // 3D prism wall) front-on into this buffer, then map it onto the niche — so
+    // the LED-prism wall is previewable inside the store, not just head-on.
+    this.nicheRT = new THREE.WebGLRenderTarget(this._artSize.width, this._artSize.height, {
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: true,
+    });
+    this.nicheRT.texture.colorSpace = THREE.SRGBColorSpace;
+    this.nicheCam = new THREE.PerspectiveCamera(45, this._frameAspect(), 0.1, 100);
+    this._black = new THREE.Color('#000000');
+    this._layoutNicheCam();
+
     this.views.setAspect(this._frameAspect());
     this.views.setFrameStyle(state.frameStyle || 'gallery');
 
@@ -106,8 +118,40 @@ export class Stage {
     this._artSize = this._computeArtSize(this.state.frame);
     if (this.art) this.art.resize(this._artSize);
     this.grade.setSize(this._artSize);
+    this.nicheRT.setSize(this._artSize.width, this._artSize.height);
+    this._layoutNicheCam();
     this.views.setAspect(this._frameAspect());
     this.setTarget(this.state.targetId); // rebuild target geometry at the new aspect
+  }
+
+  // Front-on camera that frames the target's standard footprint (FRAME_HEIGHT ×
+  // aspect) so a capture fills the niche buffer edge-to-edge.
+  _layoutNicheCam() {
+    const vFov = THREE.MathUtils.degToRad(45);
+    const d = (FRAME_HEIGHT / 2) / Math.tan(vFov / 2) * 1.04; // 4% breathing room
+    this.nicheCam.aspect = this._frameAspect();
+    this.nicheCam.position.set(0, 0, d);
+    this.nicheCam.lookAt(0, 0, 0);
+    this.nicheCam.updateProjectionMatrix();
+  }
+
+  // Render only the display target (no frame/room, on black) front-on into the
+  // niche buffer, for compositing into the store photo.
+  _captureTargetToNiche() {
+    const frame = this.views.frame;
+    const room = this.views.room;
+    const fv = frame ? frame.visible : false;
+    const rv = room ? room.visible : false;
+    if (frame) frame.visible = false;
+    if (room) room.visible = false;
+    const bg = this.scene.background;
+    this.scene.background = this._black;
+    this.renderer.setRenderTarget(this.nicheRT);
+    this.renderer.render(this.scene, this.nicheCam);
+    this.renderer.setRenderTarget(null);
+    this.scene.background = bg;
+    if (frame) frame.visible = fv;
+    if (room) room.visible = rv;
   }
 
   setPrism(prism) {
@@ -144,6 +188,15 @@ export class Stage {
         this.grade.render(this.renderer); // re-theme into the graded target
       }
       if (this.state.viewId === 'store') {
+        // Show the active target inside the niche: the 3D prism wall is captured
+        // front-on; the flat screen is just the graded art texture.
+        if (this.state.targetId === 'prism' && this.target) {
+          if (this.target.update) this.target.update(this.renderer, dt); // prism easing
+          this._captureTargetToNiche();
+          this.photoView.setArtTexture(this.nicheRT.texture);
+        } else {
+          this.photoView.setArtTexture(this.grade.texture);
+        }
         this.photoView.render(this.renderer); // store-photo composite
       } else {
         if (this.target && this.target.update) this.target.update(this.renderer, dt); // prism easing
