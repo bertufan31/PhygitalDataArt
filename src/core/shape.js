@@ -29,8 +29,8 @@ function sdTriangle(px, py, ax, ay, bx, by, cx, cy) {
 
 /** Signed distance to the emblem ring (centred space, y up); < 0 inside. */
 export function emblemDist(x, y) {
-  const tri = sdTriangle(x, y, 0.0, 0.29, -0.34, -0.255, 0.34, -0.255) - 0.15;
-  const circ = Math.hypot(x, y) - 0.28;
+  const tri = sdTriangle(x, y, 0.0, 0.193, -0.21, -0.189, 0.21, -0.189) - 0.277;
+  const circ = Math.hypot(x, y + 0.063) - 0.362;
   return Math.max(tri, -circ);
 }
 

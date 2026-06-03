@@ -16,6 +16,7 @@ import { mergedArtParams } from '../art/params.js';
 import { FlatTarget } from './targets/FlatTarget.js';
 import { PrismTarget } from './targets/PrismTarget.js';
 import { ColorGrade } from './ColorGrade.js';
+import { PhotoView } from './PhotoView.js';
 import { ViewManager } from './views/viewManager.js';
 
 const ART_BASE_RESOLUTION = 1024;
@@ -39,6 +40,8 @@ export class Stage {
 
     this._artSize = this._computeArtSize(state.frame);
     this.grade = new ColorGrade(this._artSize);
+    this.photoView = new PhotoView(); // View 2 store-photo composite
+    this.photoView.setArtTexture(this.grade.texture);
     this.views.setAspect(this._frameAspect());
     this.views.setFrameStyle(state.frameStyle || 'gallery');
 
@@ -129,6 +132,7 @@ export class Stage {
     const h = this.canvas.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h, false);
     this.views.resize(w, h);
+    this.photoView.layout(w / h);
   }
 
   start() {
@@ -139,10 +143,14 @@ export class Stage {
         this.art.update(dt); // renders art into its own target
         this.grade.render(this.renderer); // re-theme into the graded target
       }
-      if (this.target && this.target.update) this.target.update(this.renderer, dt); // prism easing pass
-      this.views.update(dt);
-      this.renderer.setRenderTarget(null);
-      this.renderer.render(this.scene, this.views.camera);
+      if (this.state.viewId === 'store') {
+        this.photoView.render(this.renderer); // store-photo composite
+      } else {
+        if (this.target && this.target.update) this.target.update(this.renderer, dt); // prism easing
+        this.views.update(dt);
+        this.renderer.setRenderTarget(null);
+        this.renderer.render(this.scene, this.views.camera);
+      }
     };
     loop();
   }

@@ -134,11 +134,11 @@ export const EMBLEM_GLSL = /* glsl */ `
                      vec2(dot(pq2, pq2), s * (v2.x * e2.y - v2.y * e2.x)));
     return -sqrt(d.x) * sign(d.y);
   }
-  // Emblem ring SDF in centred space (y up); < 0 inside the ring.
+  // Emblem ring SDF in centred space (y up); < 0 inside the ring. Traced from Key_2.
   float emblemDist(vec2 p){
-    float tri = sdTriangle(p, vec2(0.0, 0.29), vec2(-0.34, -0.255), vec2(0.34, -0.255)) - 0.15;
-    float circ = length(p) - 0.28;   // centred circular hole
-    return max(tri, -circ);          // ring = rounded triangle ∖ circle
+    float tri = sdTriangle(p, vec2(0.0, 0.193), vec2(-0.21, -0.189), vec2(0.21, -0.189)) - 0.277;
+    float circ = length(p - vec2(0.0, -0.063)) - 0.362;   // centred hole
+    return max(tri, -circ);                                // ring = rounded triangle ∖ circle
   }
   float emblemMask(vec2 p){
     float d = emblemDist(p);
