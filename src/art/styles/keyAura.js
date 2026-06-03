@@ -1,22 +1,21 @@
 // ---------------------------------------------------------------------------
 // Art option: "Key Aura".
 //
-// The whole frame is a soft SKIN surface (gently undulating), and the emblem is
-// the BONES beneath it: its signed-distance field raises a smooth bulge that
-// pushes the skin outward with natural curves — no hard silhouette, it blends
-// into the surrounding skin. Lit via the height-field normals + subsurface.
+// The whole frame is a soft SKIN surface and the emblem is the BONES beneath it:
+// the analytic emblem distance raises a smooth bulge that pushes the skin out
+// with natural curves (no hard edge). Smooth low-frequency undulation + a
+// painterly brush/layering texture, coloured by a 3-stop gradient from the
+// per-art Background → Primary → Secondary (so it colours itself; grade off).
 //
-// Effects deform the skin so the data is felt as touch: ripple = a travelling
-// surface wave, blast = a warm swell/flush, disruption = rippled dents. Colour
-// comes from the per-art grade (skin tones by default).
+// Effects are felt on the skin: ripple = travelling wave, blast = warm swell +
+// flush, disruption = rippled dents.
 // ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
 import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
-import { NOISE_GLSL, FX_GLSL } from '../shaderLib.js';
+import { NOISE_GLSL, FX_GLSL, EMBLEM_GLSL } from '../shaderLib.js';
 import { EffectField, KIND_ENERGY, Eased } from '../effects.js';
-import { getShape } from '../../core/shape.js';
 
 const FX_MAX = 16;
 
@@ -28,17 +27,14 @@ const fragmentShader = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
   uniform float uTime, uAspect, uEnergy, uKeySize;
-  uniform sampler2D uSdf;
+  uniform vec3 uColorA, uColorB, uColorBg;
   ${NOISE_GLSL}
   ${FX_GLSL}
-  float sdfV(vec2 c){
-    vec2 uvp = vec2(c.x + 0.5, 0.5 - c.y);
-    if (uvp.x < 0.0 || uvp.x > 1.0 || uvp.y < 0.0 || uvp.y > 1.0) return -1.0;
-    return texture2D(uSdf, uvp).r * 2.0 - 1.0;
-  }
+  ${EMBLEM_GLSL}
+
   float emblemBulge(vec2 c){
-    float d = sdfV(c / uKeySize);
-    return smoothstep(-0.18, 0.5, d);   // soft bulge that blends into the skin
+    float d = emblemDist(c / uKeySize);
+    return smoothstep(0.06, -0.18, d);          // soft bulge that blends into the skin
   }
   float fxHeight(vec2 c){
     float s = 0.0;
@@ -50,35 +46,46 @@ const fragmentShader = /* glsl */ `
       float age = fx.z, fade = 1.0 - age;
       if (fx.w < 0.5) {
         float env = exp(-pow((dist - age * 0.55) * 5.0, 2.0));
-        s += sin((dist - age * 0.55) * 42.0) * env * 0.12 * fade;     // ripple wave
+        s += sin((dist - age * 0.55) * 38.0) * env * 0.10 * fade;
       } else if (fx.w < 1.5) {
-        s += exp(-dist * dist * 22.0) * fade * 0.28;                  // blast swell
+        s += exp(-dist * dist * 20.0) * fade * 0.26;
       } else {
         float shell = exp(-pow((dist - age * 0.8) * 9.0, 2.0));
-        s += sin(dist * 70.0) * shell * fade * 0.12;                  // disruption dents
+        s += sin(dist * 60.0) * shell * fade * 0.10;
       }
     }
     return s;
   }
-  // Combined skin height: gentle undulation + emblem bulge + event deformation.
+  // Smooth skin height: gentle 2-octave undulation + emblem bulge + events.
   float H(vec2 c){
-    float skin = fbm(c * 1.4 + vec2(0.0, uTime * 0.05)) * 0.45;
-    return skin + 1.15 * emblemBulge(c) + fxHeight(c);
+    float skin = (snoise(c * 1.0 + vec2(0.0, uTime * 0.04)) * 0.62
+                + snoise(c * 2.1 + vec2(3.0, -uTime * 0.03)) * 0.24) * 0.4;
+    return skin + 1.1 * emblemBulge(c) + fxHeight(c);
+  }
+  // Layered, directional brush texture (painterly).
+  float brush(vec2 c){
+    float a = snoise(vec2(c.x * 3.0, c.y * 24.0) + uTime * 0.015);
+    float b = snoise(vec2(c.x * 20.0 + 7.0, c.y * 4.0) - uTime * 0.01);
+    return 0.5 * (a + b);
+  }
+  vec3 ramp(float t){
+    return t < 0.5 ? mix(uColorBg, uColorA, t * 2.0) : mix(uColorA, uColorB, (t - 0.5) * 2.0);
   }
   void main(){
     vec2 cuv = (vUv - 0.5); cuv.x *= uAspect;
+    cuv += fxDisplace(cuv) * 0.35;
     float e = 0.004;
     float hC = H(cuv), hX = H(cuv + vec2(e, 0.0)), hY = H(cuv + vec2(0.0, e));
-    vec3 n = normalize(vec3((hC - hX) / e, (hC - hY) / e, 1.7));
-    float diff = clamp(dot(n, normalize(vec3(0.35, 0.45, 0.9))), 0.0, 1.0);
+    vec3 n = normalize(vec3((hC - hX) / e, (hC - hY) / e, 1.8));
+    float diff = clamp(dot(n, normalize(vec3(0.3, 0.5, 0.9))), 0.0, 1.0);
     float bulge = emblemBulge(cuv);
 
-    float lum = 0.34 + 0.72 * diff + 0.14 * bulge;     // full-frame lit skin
-    vec3 col = vec3(lum);
-    col += fxColor(cuv) * (0.4 + 0.8 * bulge);          // blast flush, stronger over bones
+    float t = clamp(0.32 + 0.6 * diff + 0.22 * bulge, 0.0, 1.0);
+    vec3 col = ramp(t);
+    col *= 0.92 + 0.13 * brush(cuv);                  // painterly layering
+    col += fxColor(cuv) * (0.4 + 0.8 * bulge);         // event flush, stronger on bones
 
-    col = col / (col + vec3(0.85));
-    col = pow(col, vec3(0.95));
+    col = pow(clamp(col, 0.0, 1.0), vec3(0.95));
     gl_FragColor = vec4(col, 1.0);
   }
 `;
@@ -96,7 +103,6 @@ export class KeyAura extends BaseArt {
     this.time = 0;
     this.energy = new Eased(0.5, { max: 3, decay: 0.5, rise: 1.6 });
     this.fx = new EffectField(FX_MAX);
-    const shape = getShape();
     const aspect = this.size.width / this.size.height;
 
     this.uniforms = {
@@ -104,7 +110,9 @@ export class KeyAura extends BaseArt {
       uAspect: { value: aspect },
       uEnergy: { value: 0.5 },
       uKeySize: { value: 0.55 },
-      uSdf: { value: shape ? shape.sdfTexture : null },
+      uColorA: { value: new THREE.Color('#d98aa0') },
+      uColorB: { value: new THREE.Color('#ffe6cf') },
+      uColorBg: { value: new THREE.Color('#b88497') },
       uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
       uFxColor: { value: Array.from({ length: FX_MAX }, () => new THREE.Color()) },
       uFxCount: { value: 0 },
@@ -125,6 +133,9 @@ export class KeyAura extends BaseArt {
 
   setParams(p) {
     if (p.keySize != null) this.uniforms.uKeySize.value = p.keySize;
+    if (p.colorA != null) this.uniforms.uColorA.value.set(p.colorA);
+    if (p.colorB != null) this.uniforms.uColorB.value.set(p.colorB);
+    if (p.colorBg != null) this.uniforms.uColorBg.value.set(p.colorBg);
   }
 
   resize(size) {

@@ -114,3 +114,32 @@ export const FX_GLSL = /* glsl */ `
   }
 `;
 
+// ---------------------------------------------------------------------------
+// Analytic emblem (IQOS rounded triangle with a circular cut-out) as an exact
+// signed-distance field — razor-sharp at any resolution, no raster image.
+// `emblemDist(p)` works in centred space (y up); the shape sits within ~[-0.5,0.5]
+// and returns < 0 inside the ring. `emblemMask(p)` gives a crisp anti-aliased
+// 0..1 coverage using screen-space derivatives.
+// ---------------------------------------------------------------------------
+export const EMBLEM_GLSL = /* glsl */ `
+  float sdTriEq(vec2 p, float r){
+    const float k = sqrt(3.0);
+    p.x = abs(p.x) - r;
+    p.y = p.y + r / k;
+    if (p.x + k * p.y > 0.0) p = vec2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+    p.x -= clamp(p.x, -2.0 * r, 0.0);
+    return -length(p) * sign(p.y);
+  }
+  float emblemDist(vec2 p){
+    float tri = sdTriEq(vec2(p.x, p.y - 0.05), 0.275) - 0.175; // rounded triangle, apex up
+    float circ = length(p - vec2(0.0, -0.05)) - 0.295;          // circular hole
+    return max(tri, -circ);                                      // ring = outer ∖ inner
+  }
+  float emblemMask(vec2 p){
+    float d = emblemDist(p);
+    float aa = fwidth(d) * 1.25;
+    return 1.0 - smoothstep(-aa, aa, d);
+  }
+`;
+
+

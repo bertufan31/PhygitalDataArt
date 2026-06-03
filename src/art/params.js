@@ -23,7 +23,7 @@ const COLOR_DEFAULTS = {
 
 // Default recolour amount per art (how strongly the duotone applies).
 const AMOUNT_DEFAULTS = {
-  'key-aura': 0.85,
+  'key-aura': 0, // colours itself from the 3-stop gradient
   'key-particles': 0.5,
   'key-pattern': 0.5,
 };

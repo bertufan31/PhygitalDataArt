@@ -9,9 +9,8 @@
 import * as THREE from 'three';
 import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
-import { FX_GLSL } from '../shaderLib.js';
+import { FX_GLSL, EMBLEM_GLSL } from '../shaderLib.js';
 import { EffectField, KIND_ENERGY, Eased } from '../effects.js';
-import { getShape } from '../../core/shape.js';
 
 const FX_MAX = 16;
 
@@ -23,8 +22,8 @@ const fragmentShader = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
   uniform float uTime, uAspect, uEnergy, uSize, uRotation, uPadding, uDistance;
-  uniform sampler2D uMask;
   ${FX_GLSL}
+  ${EMBLEM_GLSL}
   float hash(vec2 p){ return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453); }
   void main(){
     vec2 cuv = (vUv - 0.5); cuv.x *= uAspect;
@@ -62,7 +61,7 @@ const fragmentShader = /* glsl */ `
     vec2 rl = mat2(ca, -sa, sa, ca) * local;
     float scale = max(0.05, uSize * (1.0 - uPadding) * (1.0 + extraScale));
     vec2 s = rl / scale;
-    float inside = (abs(s.x) < 0.5 && abs(s.y) < 0.5) ? texture2D(uMask, vec2(0.5 + s.x, 0.5 - s.y)).a : 0.0;
+    float inside = emblemMask(s); // analytic emblem (crisp at any resolution)
 
     float shimmer = 0.6 + 0.4 * sin(uTime * 0.8 + hash(cell) * 6.2831);
     vec3 base = vec3(shimmer * (0.7 + 0.4 * uEnergy) + bright);
@@ -89,7 +88,6 @@ export class KeyPattern extends BaseArt {
     this.time = 0;
     this.energy = new Eased(0.5, { max: 3, decay: 0.6, rise: 1.8 });
     this.fx = new EffectField(FX_MAX);
-    const shape = getShape();
     const aspect = this.size.width / this.size.height;
 
     this.uniforms = {
@@ -100,7 +98,6 @@ export class KeyPattern extends BaseArt {
       uRotation: { value: 0 },
       uPadding: { value: 0.1 },
       uDistance: { value: 0.3 },
-      uMask: { value: shape ? shape.maskTexture : null },
       uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
       uFxColor: { value: Array.from({ length: FX_MAX }, () => new THREE.Color()) },
       uFxCount: { value: 0 },

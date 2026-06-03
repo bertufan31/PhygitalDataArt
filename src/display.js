@@ -11,7 +11,6 @@ import './ui/display.css';
 import { loadState, saveState, applyCommand } from './core/state.js';
 import { createBus } from './core/bus.js';
 import { CommandTypes, makeCommand } from './core/events.js';
-import { loadShape } from './core/shape.js';
 import { Stage } from './render/Stage.js';
 import { Simulator } from './core/simulator.js';
 import { initHamburger } from './ui/hamburger.js';
@@ -20,7 +19,7 @@ const canvas = document.getElementById('stage');
 const state = loadState();
 const bus = createBus();
 
-loadShape(512).then(init);
+init();
 
 function init() {
   const stage = new Stage(canvas, state);

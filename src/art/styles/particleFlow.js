@@ -26,7 +26,7 @@ const vertexShader = /* glsl */ `
   precision highp float;
   #define FX_MAX ${FX_MAX}
   attribute vec2 aMeta;            // x = speed, y = colour parameter
-  uniform float uTime, uAspect, uEnergy, uPaletteShift, uTintAmount;
+  uniform float uTime, uAspect, uEnergy, uPaletteShift, uTintAmount, uSizeScale;
   uniform vec3  uTint;
   uniform vec4  uFxPos[FX_MAX];    // xy(0..1), z = ageNorm, w = kind
   uniform vec3  uFxColor[FX_MAX];
@@ -97,7 +97,7 @@ const vertexShader = /* glsl */ `
 
     vAlpha = smoothstep(0.0, 0.1, phase) * smoothstep(1.0, 0.82, phase);
     gl_Position = vec4(pos, 0.0, 1.0);
-    gl_PointSize = 1.3 + 1.8 * uEnergy + sizeBoost;
+    gl_PointSize = (1.3 + 1.8 * uEnergy + sizeBoost) * uSizeScale;
   }
 `;
 
@@ -115,6 +115,10 @@ const fragmentShader = /* glsl */ `
 export class ParticleFlow extends BaseArt {
   static id = 'particle-flow';
   static label = 'Particle Flow';
+  static params = [
+    { key: 'count', type: 'range', label: 'Particles', min: 20000, max: 300000, step: 20000, default: 120000 },
+    { key: 'size', type: 'range', label: 'Particle size', min: 0.3, max: 4, step: 0.1, default: 1 },
+  ];
 
   init(ctx) {
     this.renderer = ctx.renderer;
@@ -126,22 +130,7 @@ export class ParticleFlow extends BaseArt {
     this.tintAmount = new Eased(0, { max: 0.8, decay: 0.35, rise: 2.2 });
     this.fx = new EffectField(FX_MAX);
 
-    const positions = new Float32Array(COUNT * 3);
-    const meta = new Float32Array(COUNT * 2);
-    for (let i = 0; i < COUNT; i++) {
-      const sx = (Math.random() * 2 - 1) * 1.1;
-      const sy = (Math.random() * 2 - 1) * 1.1;
-      positions[i * 3 + 0] = sx;
-      positions[i * 3 + 1] = sy;
-      positions[i * 3 + 2] = Math.random();
-      meta[i * 2 + 0] = 0.5 + Math.random();
-      meta[i * 2 + 1] = 0.5 + 0.25 * Math.sin(sx * 2.0) + 0.22 * Math.cos(sy * 1.7) + (Math.random() - 0.5) * 0.06;
-    }
-    const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute('aMeta', new THREE.BufferAttribute(meta, 2));
-    this.geometry = geo;
-
+    this.count = COUNT;
     const aspect = this.size.width / this.size.height;
     this.uniforms = {
       uTime: { value: 0 },
@@ -150,6 +139,7 @@ export class ParticleFlow extends BaseArt {
       uPaletteShift: { value: 0 },
       uTint: { value: this.tint.clone() },
       uTintAmount: { value: 0 },
+      uSizeScale: { value: 1 },
       uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
       uFxColor: { value: Array.from({ length: FX_MAX }, () => new THREE.Color()) },
       uFxCount: { value: 0 },
@@ -164,17 +154,49 @@ export class ParticleFlow extends BaseArt {
       blending: THREE.AdditiveBlending,
     });
 
-    this.points = new THREE.Points(this.geometry, this.material);
-    this.points.frustumCulled = false;
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#000000');
     this.camera = new THREE.Camera();
-    this.scene.add(this.points);
+    this._buildGeometry();
 
     this.renderTarget = new THREE.WebGLRenderTarget(this.size.width, this.size.height, {
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false,
     });
     this.renderTarget.texture.colorSpace = THREE.SRGBColorSpace;
+  }
+
+  _buildGeometry() {
+    if (this.points) {
+      this.scene.remove(this.points);
+      this.geometry.dispose();
+    }
+    const n = this.count;
+    const positions = new Float32Array(n * 3);
+    const meta = new Float32Array(n * 2);
+    for (let i = 0; i < n; i++) {
+      const sx = (Math.random() * 2 - 1) * 1.1;
+      const sy = (Math.random() * 2 - 1) * 1.1;
+      positions[i * 3 + 0] = sx;
+      positions[i * 3 + 1] = sy;
+      positions[i * 3 + 2] = Math.random();
+      meta[i * 2 + 0] = 0.5 + Math.random();
+      meta[i * 2 + 1] = 0.5 + 0.25 * Math.sin(sx * 2.0) + 0.22 * Math.cos(sy * 1.7) + (Math.random() - 0.5) * 0.06;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('aMeta', new THREE.BufferAttribute(meta, 2));
+    this.geometry = geo;
+    this.points = new THREE.Points(geo, this.material);
+    this.points.frustumCulled = false;
+    this.scene.add(this.points);
+  }
+
+  setParams(p) {
+    if (p.size != null) this.uniforms.uSizeScale.value = p.size;
+    if (p.count != null && (p.count | 0) !== this.count) {
+      this.count = p.count | 0;
+      this._buildGeometry();
+    }
   }
 
   resize(size) {

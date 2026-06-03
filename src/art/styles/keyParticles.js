@@ -2,27 +2,27 @@
 // Art option: "Key Particles".
 //
 // A rotating 3D point-cloud in the emblem shape (the gif's particle-sphere
-// treatment). Points are sampled inside the emblem and given depth from the SDF
-// (a domed lens), so the slowly rotating form reads volumetric; they twinkle at
-// idle. Data reactions: ripple = bright ring through the cloud, blast = central
-// burst, disruption = particles scatter. Colour comes from the per-art grade.
+// treatment). Points are sampled inside the analytic emblem and given depth
+// from its distance field (a domed lens); they twinkle at idle. Controls:
+// particle Count + Size, Spin, Depth. Data reactions tint particles toward the
+// event colour and spawn ON the emblem ring (random points would miss it).
 // ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
 import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
 import { EffectField, KIND_ENERGY, Eased } from '../effects.js';
-import { getShape, samplePoints, sdfAt } from '../../core/shape.js';
+import { samplePoints, sdfAt } from '../../core/shape.js';
 
-const COUNT = 50000;
 const FX_MAX = 8;
+const SHAPE_SCALE = 1.8; // emblem fills the frame (samplePoints are ~[-0.5,0.5])
 
 const vertexShader = /* glsl */ `
   precision highp float;
   #define FX_MAX ${FX_MAX}
   attribute float aPhase;
   attribute float aSize;
-  uniform float uTime, uEnergy, uTwinkle, uPixel;
+  uniform float uTime, uEnergy, uTwinkle, uPixel, uSizeScale;
   uniform vec4 uFxPos[FX_MAX];
   uniform vec3 uFxColor[FX_MAX];
   uniform int uFxCount;
@@ -42,9 +42,9 @@ const vertexShader = /* glsl */ `
       if (fx.w < 0.5) {                                    // ripple ring
         float w = exp(-pow((dist - age * 1.5) * 4.0, 2.0)) * fade;
         tintCol += uFxColor[i] * w; tintAmt += w; bright += w * 0.7; sizeB += w * 2.0;
-      } else if (fx.w < 1.5) {                             // blast burst
-        float w = exp(-dist * dist * 6.0) * fade;
-        tintCol += uFxColor[i] * w * 1.4; tintAmt += w * 1.4; bright += w * 1.2; sizeB += w * 4.0;
+      } else if (fx.w < 1.5) {                             // blast: wide central bloom
+        float w = exp(-dist * dist * 4.0) * fade;
+        tintCol += uFxColor[i] * w * 2.0; tintAmt += w * 2.0; bright += w * 1.3; sizeB += w * 4.5;
       } else {                                             // disruption scatter
         float w = exp(-pow((dist - age * 1.6) * 5.0, 2.0)) * fade;
         vec2 jd = normalize(vec2(sin(aPhase * 50.0), cos(aPhase * 33.0)) + 1e-5);
@@ -57,7 +57,7 @@ const vertexShader = /* glsl */ `
     vAlpha = tw * (0.7 + 0.35 * uEnergy) + bright;
     vec4 mv = modelViewMatrix * vec4(pos, 1.0);
     gl_Position = projectionMatrix * mv;
-    gl_PointSize = aSize * uPixel * (1.0 + 0.4 * uEnergy + sizeB) * (6.0 / -mv.z);
+    gl_PointSize = aSize * uPixel * uSizeScale * (1.0 + 0.4 * uEnergy + sizeB) * (6.0 / -mv.z);
   }
 `;
 const fragmentShader = /* glsl */ `
@@ -68,7 +68,6 @@ const fragmentShader = /* glsl */ `
   void main(){
     vec2 c = gl_PointCoord - 0.5;
     float m = smoothstep(0.5, 0.0, length(c));
-    // Replace toward the event colour (saturated) so it survives the grade.
     vec3 base = mix(vec3(0.82, 0.9, 1.0), vTint / max(vMix, 1e-3), clamp(vMix, 0.0, 1.0));
     gl_FragColor = vec4(base * m * vAlpha, m * vAlpha);
   }
@@ -78,6 +77,8 @@ export class KeyParticles extends BaseArt {
   static id = 'key-particles';
   static label = 'Key Particles';
   static params = [
+    { key: 'count', type: 'range', label: 'Particles', min: 10000, max: 200000, step: 10000, default: 50000 },
+    { key: 'size', type: 'range', label: 'Particle size', min: 0.3, max: 4, step: 0.1, default: 1 },
     { key: 'spin', type: 'range', label: 'Spin', min: 0, max: 1.0, step: 0.05, default: 0.3 },
     { key: 'depth', type: 'range', label: 'Depth', min: 0.0, max: 0.8, step: 0.05, default: 0.4 },
   ];
@@ -87,23 +88,37 @@ export class KeyParticles extends BaseArt {
     this.size = ctx.size;
     this.time = 0;
     this.spin = 0.3;
+    this.count = 50000;
+    this.depth = 0.4;
     this.energy = new Eased(0.5, { max: 3, decay: 0.6, rise: 1.8 });
-    getShape();
     // Spawn effects ON the emblem (it's a thin ring; random points would miss it).
     this._pool = samplePoints(400);
     this.fx = new EffectField(FX_MAX, () => {
       const i = ((Math.random() * 400) | 0) * 2;
-      return { x: (this._pool[i] * 0.9 + 1) / 2, y: (this._pool[i + 1] * 0.9 + 1) / 2 };
+      return { x: (this._pool[i] * SHAPE_SCALE + 1) / 2, y: (this._pool[i + 1] * SHAPE_SCALE + 1) / 2 };
     });
 
-    this._build(0.4);
-
     const aspect = this.size.width / this.size.height;
+    this.uniforms = {
+      uTime: { value: 0 },
+      uEnergy: { value: 0.5 },
+      uTwinkle: { value: 1.6 },
+      uPixel: { value: this.size.height / 600 },
+      uSizeScale: { value: 1 },
+      uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
+      uFxColor: { value: Array.from({ length: FX_MAX }, () => new THREE.Color()) },
+      uFxCount: { value: 0 },
+    };
+    this.material = new THREE.ShaderMaterial({
+      uniforms: this.uniforms, vertexShader, fragmentShader,
+      transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+
     this.camera = new THREE.PerspectiveCamera(45, aspect, 0.1, 100);
     this.camera.position.set(0, 0, 3.2);
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#000000');
-    this.scene.add(this.points);
+    this._build();
 
     this.renderTarget = new THREE.WebGLRenderTarget(this.size.width, this.size.height, {
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false,
@@ -111,16 +126,21 @@ export class KeyParticles extends BaseArt {
     this.renderTarget.texture.colorSpace = THREE.SRGBColorSpace;
   }
 
-  _build(depth) {
-    const pts = samplePoints(COUNT); // [x,y] in [-1,1]
-    const positions = new Float32Array(COUNT * 3);
-    const phase = new Float32Array(COUNT);
-    const sizes = new Float32Array(COUNT);
-    for (let i = 0; i < COUNT; i++) {
-      const x = pts[i * 2] * 0.9;
-      const y = pts[i * 2 + 1] * 0.9;
-      const inside = Math.max(0, sdfAt(pts[i * 2], pts[i * 2 + 1]));
-      const z = (Math.random() < 0.5 ? -1 : 1) * inside * depth + (Math.random() - 0.5) * 0.04;
+  _build() {
+    if (this.points) {
+      this.scene.remove(this.points);
+      this.geometry.dispose();
+    }
+    const n = this.count;
+    const pts = samplePoints(n);
+    const positions = new Float32Array(n * 3);
+    const phase = new Float32Array(n);
+    const sizes = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const x = pts[i * 2] * SHAPE_SCALE;
+      const y = pts[i * 2 + 1] * SHAPE_SCALE;
+      const inside = sdfAt(pts[i * 2], pts[i * 2 + 1]);
+      const z = (Math.random() < 0.5 ? -1 : 1) * inside * (this.depth / 0.18) + (Math.random() - 0.5) * 0.04;
       positions[i * 3] = x;
       positions[i * 3 + 1] = y;
       positions[i * 3 + 2] = z;
@@ -132,36 +152,18 @@ export class KeyParticles extends BaseArt {
     geo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
     geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
     this.geometry = geo;
-
-    this.uniforms = {
-      uTime: { value: 0 },
-      uEnergy: { value: 0.5 },
-      uTwinkle: { value: 1.6 },
-      uPixel: { value: this.size.height / 600 },
-      uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
-      uFxColor: { value: Array.from({ length: FX_MAX }, () => new THREE.Color()) },
-      uFxCount: { value: 0 },
-    };
-    this.material = new THREE.ShaderMaterial({
-      uniforms: this.uniforms, vertexShader, fragmentShader,
-      transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
-    });
-    this.points = new THREE.Points(this.geometry, this.material);
+    this.points = new THREE.Points(geo, this.material);
     this.points.frustumCulled = false;
+    this.scene.add(this.points);
   }
 
   setParams(p) {
     if (p.spin != null) this.spin = p.spin;
-    if (p.depth != null && this.points) {
-      // Rebuild depth distribution.
-      this.scene.remove(this.points);
-      this.geometry.dispose();
-      this.material.dispose();
-      const fx = this.uniforms.uFxCount; // preserve nothing; rebuild fresh
-      this._build(p.depth);
-      this.scene.add(this.points);
-      void fx;
-    }
+    if (p.size != null) this.uniforms.uSizeScale.value = p.size;
+    let rebuild = false;
+    if (p.count != null && p.count !== this.count) { this.count = p.count | 0; rebuild = true; }
+    if (p.depth != null && p.depth !== this.depth) { this.depth = p.depth; rebuild = true; }
+    if (rebuild) this._build();
   }
 
   resize(size) {
