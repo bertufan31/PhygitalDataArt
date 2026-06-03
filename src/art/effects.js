@@ -25,9 +25,9 @@ export function effectForEvent(event) {
     case EventTypes.VISITOR_ENTERED:
       return { kind: EffectKinds.RIPPLE, color: '#7fe0ff', life: 2.8 };
     case EventTypes.FLAVOUR_SOLD:
-      return { kind: EffectKinds.BLAST, color: event.data?.color || '#ffd886', life: 2.6 };
+      return { kind: EffectKinds.BLAST, color: event.data?.color || '#ffae33', life: 2.6 };
     case EventTypes.SALE_MADE:
-      return { kind: EffectKinds.BLAST, color: '#ffd886', life: 2.2 };
+      return { kind: EffectKinds.BLAST, color: '#ffae33', life: 2.2 };
     case EventTypes.PRODUCT_SOLD:
       return { kind: EffectKinds.DISRUPTION, color: '#cda8ff', life: 1.9 };
     default:
@@ -72,18 +72,21 @@ export class Eased {
  * 3-distinct-effects principle is implemented once.
  */
 export class EffectField {
-  constructor(max = 16) {
+  /** @param {number} max @param {() => {x:number,y:number}} [positioner] override where effects spawn (0..1) */
+  constructor(max = 16, positioner = null) {
     this.max = max;
+    this.positioner = positioner;
     this.list = [];
   }
 
-  /** Spawn the effect for an event at a random position. Returns it (or null). */
+  /** Spawn the effect for an event. Returns it (or null). */
   spawn(event) {
     const e = effectForEvent(event);
     if (!e) return null;
+    const p = this.positioner ? this.positioner() : { x: Math.random(), y: Math.random() };
     const fx = {
-      x: Math.random(),
-      y: Math.random(),
+      x: p.x,
+      y: p.y,
       age: 0,
       life: e.life,
       kind: e.kind,

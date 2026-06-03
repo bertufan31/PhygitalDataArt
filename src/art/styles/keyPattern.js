@@ -31,17 +31,43 @@ const fragmentShader = /* glsl */ `
     vec2 p = cuv / uDistance;
     vec2 cell = floor(p);
     vec2 local = fract(p) - 0.5;
-    float ca = cos(uRotation), sa = sin(uRotation);
-    vec2 rl = mat2(ca, -sa, sa, ca) * local;
-    float scale = max(0.05, uSize * (1.0 - uPadding));
-    vec2 s = rl / scale;
-    float inside = 0.0;
-    if (abs(s.x) < 0.5 && abs(s.y) < 0.5) {
-      inside = texture2D(uMask, vec2(0.5 + s.x, 0.5 - s.y)).a;
+    vec2 cellCenter = (cell + 0.5) * uDistance;
+
+    // Per-TILE reactions: tiles near an event grow, brighten, recolour, spin.
+    float extraScale = 0.0, bright = 0.0, extraRot = 0.0, tAmt = 0.0;
+    vec3 tcol = vec3(0.0);
+    for (int i = 0; i < FX_MAX; i++) {
+      if (i >= uFxCount) break;
+      vec4 fx = uFxPos[i];
+      vec2 ctr = (fx.xy - 0.5); ctr.x *= uFxAspect;
+      float dist = distance(cellCenter, ctr);
+      float age = fx.z, fade = 1.0 - age;
+      if (fx.w < 0.5) {                                   // ripple: a ring of growth sweeps out
+        float ring = exp(-pow((dist - age * 0.7) * 5.0, 2.0));
+        extraScale += ring * fade * 0.4; bright += ring * fade * 0.9;
+        tcol += uFxColor[i] * ring * fade; tAmt += ring * fade;
+      } else if (fx.w < 1.5) {                            // blast: tiles bloom big in its colour
+        float core = exp(-dist * dist * 10.0);
+        extraScale += core * fade * 0.7; bright += core * fade * 1.5;
+        tcol += uFxColor[i] * core * fade; tAmt += core * fade;
+      } else {                                            // disruption: tiles spin + flicker
+        float shell = exp(-pow((dist - age * 0.8) * 6.0, 2.0));
+        extraRot += shell * fade * 2.2; bright += shell * fade * 0.6;
+        tcol += uFxColor[i] * shell * fade; tAmt += shell * fade;
+      }
     }
+    tAmt = clamp(tAmt, 0.0, 1.0);
+
+    float ca = cos(uRotation + extraRot), sa = sin(uRotation + extraRot);
+    vec2 rl = mat2(ca, -sa, sa, ca) * local;
+    float scale = max(0.05, uSize * (1.0 - uPadding) * (1.0 + extraScale));
+    vec2 s = rl / scale;
+    float inside = (abs(s.x) < 0.5 && abs(s.y) < 0.5) ? texture2D(uMask, vec2(0.5 + s.x, 0.5 - s.y)).a : 0.0;
+
     float shimmer = 0.6 + 0.4 * sin(uTime * 0.8 + hash(cell) * 6.2831);
-    vec3 col = vec3(1.0) * inside * shimmer * (0.7 + 0.4 * uEnergy);
-    col += fxColor(cuv) * inside;
+    vec3 base = vec3(shimmer * (0.7 + 0.4 * uEnergy) + bright);
+    base = mix(base, tcol * 2.2, tAmt * 0.85);          // tile takes on the event colour
+    vec3 col = base * inside;
     col = col / (col + vec3(0.6));
     gl_FragColor = vec4(col, 1.0);
   }

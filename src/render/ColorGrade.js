@@ -20,14 +20,22 @@ const fragmentShader = /* glsl */ `
   uniform sampler2D uSrc;
   uniform vec3 uColorA;
   uniform vec3 uColorB;
+  uniform vec3 uColorBg;
   uniform float uAmount;
   void main(){
     vec3 src = texture2D(uSrc, vUv).rgb;
     float l = dot(src, vec3(0.299, 0.587, 0.114));
-    // Duotone keeps the artwork's luminance structure, takes its hue from the
-    // two chosen colours, then blends over the original by amount.
+    float mx = max(src.r, max(src.g, src.b));
+    float mn = min(src.r, min(src.g, src.b));
+    float sat = (mx - mn) / (mx + 1e-5);
+    // Duotone the artwork's luminance into primary → secondary, but KEEP the
+    // artwork's own saturated colours (the event ripple/blast/flavour hues).
     vec3 duo = mix(uColorA, uColorB, smoothstep(0.0, 1.0, l)) * (0.35 + 0.95 * l);
-    gl_FragColor = vec4(mix(src, duo, clamp(uAmount, 0.0, 1.0)), 1.0);
+    vec3 themed = mix(duo, src, clamp(sat * 1.7, 0.0, 1.0));
+    vec3 art = mix(src, themed, clamp(uAmount, 0.0, 1.0));
+    // Composite over the editable background colour (shows through dark areas).
+    float coverage = smoothstep(0.02, 0.35, l);
+    gl_FragColor = vec4(mix(uColorBg, art, coverage), 1.0);
   }
 `;
 
@@ -39,6 +47,7 @@ export class ColorGrade {
       uSrc: { value: null },
       uColorA: { value: new THREE.Color('#0a0f1e') },
       uColorB: { value: new THREE.Color('#7fbfff') },
+      uColorBg: { value: new THREE.Color('#05060a') },
       uAmount: { value: 0.35 },
     };
     this.material = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader, fragmentShader });
@@ -58,9 +67,10 @@ export class ColorGrade {
     this.uniforms.uSrc.value = texture;
   }
 
-  setColors({ colorA, colorB, colorAmount }) {
+  setColors({ colorA, colorB, colorBg, colorAmount }) {
     if (colorA != null) this.uniforms.uColorA.value.set(colorA);
     if (colorB != null) this.uniforms.uColorB.value.set(colorB);
+    if (colorBg != null) this.uniforms.uColorBg.value.set(colorBg);
     if (colorAmount != null) this.uniforms.uAmount.value = colorAmount;
   }
 

@@ -28,10 +28,11 @@ const vertexShader = /* glsl */ `
   uniform int uFxCount;
   varying float vAlpha;
   varying vec3 vTint;
+  varying float vMix;
   void main(){
     vec3 pos = position;
-    vec3 fxc = vec3(0.0);
-    float bright = 0.0, sizeB = 0.0;
+    vec3 tintCol = vec3(0.0);
+    float tintAmt = 0.0, bright = 0.0, sizeB = 0.0;
     for (int i = 0; i < FX_MAX; i++) {
       if (i >= uFxCount) break;
       vec4 fx = uFxPos[i];
@@ -39,19 +40,19 @@ const vertexShader = /* glsl */ `
       float dist = distance(pos.xy, c);
       float age = fx.z, fade = 1.0 - age;
       if (fx.w < 0.5) {                                    // ripple ring
-        float ring = exp(-pow((dist - age * 1.5) * 4.0, 2.0));
-        fxc += uFxColor[i] * ring * fade; bright += ring * fade; sizeB += ring * fade * 2.0;
+        float w = exp(-pow((dist - age * 1.5) * 4.0, 2.0)) * fade;
+        tintCol += uFxColor[i] * w; tintAmt += w; bright += w * 0.7; sizeB += w * 2.0;
       } else if (fx.w < 1.5) {                             // blast burst
-        float core = exp(-dist * dist * 6.0);
-        fxc += uFxColor[i] * core * fade * 1.6; bright += core * fade * 1.2; sizeB += core * fade * 4.0;
+        float w = exp(-dist * dist * 6.0) * fade;
+        tintCol += uFxColor[i] * w * 1.4; tintAmt += w * 1.4; bright += w * 1.2; sizeB += w * 4.0;
       } else {                                             // disruption scatter
-        float shell = exp(-pow((dist - age * 1.6) * 5.0, 2.0));
+        float w = exp(-pow((dist - age * 1.6) * 5.0, 2.0)) * fade;
         vec2 jd = normalize(vec2(sin(aPhase * 50.0), cos(aPhase * 33.0)) + 1e-5);
-        pos.xy += jd * shell * fade * 0.08;
-        fxc += uFxColor[i] * shell * fade * 0.7; sizeB += shell * fade * 2.0;
+        pos.xy += jd * w * 0.08;
+        tintCol += uFxColor[i] * w; tintAmt += w * 0.8; bright += w * 0.4; sizeB += w * 2.0;
       }
     }
-    vTint = fxc;
+    vTint = tintCol; vMix = tintAmt;
     float tw = 0.45 + 0.55 * abs(sin(uTime * uTwinkle + aPhase * 6.2831));
     vAlpha = tw * (0.7 + 0.35 * uEnergy) + bright;
     vec4 mv = modelViewMatrix * vec4(pos, 1.0);
@@ -63,11 +64,13 @@ const fragmentShader = /* glsl */ `
   precision highp float;
   varying float vAlpha;
   varying vec3 vTint;
+  varying float vMix;
   void main(){
     vec2 c = gl_PointCoord - 0.5;
     float m = smoothstep(0.5, 0.0, length(c));
-    vec3 col = vec3(0.85, 0.92, 1.0) + vTint;
-    gl_FragColor = vec4(col * m * vAlpha, m * vAlpha);
+    // Replace toward the event colour (saturated) so it survives the grade.
+    vec3 base = mix(vec3(0.82, 0.9, 1.0), vTint / max(vMix, 1e-3), clamp(vMix, 0.0, 1.0));
+    gl_FragColor = vec4(base * m * vAlpha, m * vAlpha);
   }
 `;
 
@@ -85,8 +88,13 @@ export class KeyParticles extends BaseArt {
     this.time = 0;
     this.spin = 0.3;
     this.energy = new Eased(0.5, { max: 3, decay: 0.6, rise: 1.8 });
-    this.fx = new EffectField(FX_MAX);
     getShape();
+    // Spawn effects ON the emblem (it's a thin ring; random points would miss it).
+    this._pool = samplePoints(400);
+    this.fx = new EffectField(FX_MAX, () => {
+      const i = ((Math.random() * 400) | 0) * 2;
+      return { x: (this._pool[i] * 0.9 + 1) / 2, y: (this._pool[i + 1] * 0.9 + 1) / 2 };
+    });
 
     this._build(0.4);
 

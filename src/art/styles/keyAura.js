@@ -1,11 +1,14 @@
 // ---------------------------------------------------------------------------
 // Art option: "Key Aura".
 //
-// The emblem rendered as a soft, volumetric, skin-like form using its
-// signed-distance field: the shape bulges toward its centreline, is shaded with
-// SDF-derived normals + a subsurface glow, and breathes/flows gently at idle.
-// Data reactions ripple the skin (ripple/disruption warp the SDF sampling) and
-// bloom warm light into it (blast). Colour comes from the per-art grade.
+// The whole frame is a soft SKIN surface (gently undulating), and the emblem is
+// the BONES beneath it: its signed-distance field raises a smooth bulge that
+// pushes the skin outward with natural curves — no hard silhouette, it blends
+// into the surrounding skin. Lit via the height-field normals + subsurface.
+//
+// Effects deform the skin so the data is felt as touch: ripple = a travelling
+// surface wave, blast = a warm swell/flush, disruption = rippled dents. Colour
+// comes from the per-art grade (skin tones by default).
 // ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
@@ -24,40 +27,58 @@ const vertexShader = /* glsl */ `
 const fragmentShader = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
-  uniform float uTime, uAspect, uEnergy;
+  uniform float uTime, uAspect, uEnergy, uKeySize;
   uniform sampler2D uSdf;
   ${NOISE_GLSL}
   ${FX_GLSL}
   float sdfV(vec2 c){
     vec2 uvp = vec2(c.x + 0.5, 0.5 - c.y);
-    if (uvp.x < 0.0 || uvp.x > 1.0 || uvp.y < 0.0 || uvp.y > 1.0) return -1.0; // outside the shape box
+    if (uvp.x < 0.0 || uvp.x > 1.0 || uvp.y < 0.0 || uvp.y > 1.0) return -1.0;
     return texture2D(uSdf, uvp).r * 2.0 - 1.0;
+  }
+  float emblemBulge(vec2 c){
+    float d = sdfV(c / uKeySize);
+    return smoothstep(-0.18, 0.5, d);   // soft bulge that blends into the skin
+  }
+  float fxHeight(vec2 c){
+    float s = 0.0;
+    for (int i = 0; i < FX_MAX; i++) {
+      if (i >= uFxCount) break;
+      vec4 fx = uFxPos[i];
+      vec2 ctr = (fx.xy - 0.5); ctr.x *= uFxAspect;
+      float dist = distance(c, ctr);
+      float age = fx.z, fade = 1.0 - age;
+      if (fx.w < 0.5) {
+        float env = exp(-pow((dist - age * 0.55) * 5.0, 2.0));
+        s += sin((dist - age * 0.55) * 42.0) * env * 0.12 * fade;     // ripple wave
+      } else if (fx.w < 1.5) {
+        s += exp(-dist * dist * 22.0) * fade * 0.28;                  // blast swell
+      } else {
+        float shell = exp(-pow((dist - age * 0.8) * 9.0, 2.0));
+        s += sin(dist * 70.0) * shell * fade * 0.12;                  // disruption dents
+      }
+    }
+    return s;
+  }
+  // Combined skin height: gentle undulation + emblem bulge + event deformation.
+  float H(vec2 c){
+    float skin = fbm(c * 1.4 + vec2(0.0, uTime * 0.05)) * 0.45;
+    return skin + 1.15 * emblemBulge(c) + fxHeight(c);
   }
   void main(){
     vec2 cuv = (vUv - 0.5); cuv.x *= uAspect;
-    cuv *= 1.0 + 0.02 * sin(uTime * 0.6);          // gentle breathing (idle)
-    cuv += fxDisplace(cuv);                          // disruption/ripple warp the skin
+    float e = 0.004;
+    float hC = H(cuv), hX = H(cuv + vec2(e, 0.0)), hY = H(cuv + vec2(0.0, e));
+    vec3 n = normalize(vec3((hC - hX) / e, (hC - hY) / e, 1.7));
+    float diff = clamp(dot(n, normalize(vec3(0.35, 0.45, 0.9))), 0.0, 1.0);
+    float bulge = emblemBulge(cuv);
 
-    float d = sdfV(cuv);
-    float e = 0.005;
-    vec2 grad = vec2(sdfV(cuv + vec2(e, 0.0)) - sdfV(cuv - vec2(e, 0.0)),
-                     sdfV(cuv + vec2(0.0, e)) - sdfV(cuv - vec2(0.0, e)));
-    float presence = smoothstep(-0.03, 0.05, d);
-    float thickness = smoothstep(0.0, 0.55, d);
-    vec3 n = normalize(vec3(-grad * 7.0, 0.55));
-    float diff = 0.3 + 0.7 * max(dot(n, normalize(vec3(0.3, 0.45, 0.8))), 0.0);
+    float lum = 0.34 + 0.72 * diff + 0.14 * bulge;     // full-frame lit skin
+    vec3 col = vec3(lum);
+    col += fxColor(cuv) * (0.4 + 0.8 * bulge);          // blast flush, stronger over bones
 
-    float flow = fbm(vUv * 3.0 + vec2(0.0, uTime * 0.08));
-    float subsurface = thickness * (0.35 + 0.4 * flow);
-    float lum = presence * (diff * (0.55 + 0.45 * thickness) + subsurface * 0.6);
-
-    vec3 skin = vec3(lum);
-    skin += fxColor(cuv) * presence;                 // blast/ripple glow inside the skin
-
-    vec3 bg = vec3(0.02 + 0.05 * vUv.y);             // faint dreamy ground
-    vec3 col = mix(bg, skin, presence);
-    col = col / (col + vec3(0.7));
-    col = pow(col, vec3(0.92));
+    col = col / (col + vec3(0.85));
+    col = pow(col, vec3(0.95));
     gl_FragColor = vec4(col, 1.0);
   }
 `;
@@ -65,6 +86,9 @@ const fragmentShader = /* glsl */ `
 export class KeyAura extends BaseArt {
   static id = 'key-aura';
   static label = 'Key Aura';
+  static params = [
+    { key: 'keySize', type: 'range', label: 'Key size', min: 0.3, max: 0.95, step: 0.05, default: 0.55 },
+  ];
 
   init(ctx) {
     this.renderer = ctx.renderer;
@@ -79,6 +103,7 @@ export class KeyAura extends BaseArt {
       uTime: { value: 0 },
       uAspect: { value: aspect },
       uEnergy: { value: 0.5 },
+      uKeySize: { value: 0.55 },
       uSdf: { value: shape ? shape.sdfTexture : null },
       uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
       uFxColor: { value: Array.from({ length: FX_MAX }, () => new THREE.Color()) },
@@ -96,6 +121,10 @@ export class KeyAura extends BaseArt {
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false,
     });
     this.renderTarget.texture.colorSpace = THREE.SRGBColorSpace;
+  }
+
+  setParams(p) {
+    if (p.keySize != null) this.uniforms.uKeySize.value = p.keySize;
   }
 
   resize(size) {

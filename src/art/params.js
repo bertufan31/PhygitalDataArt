@@ -1,31 +1,35 @@
 // ---------------------------------------------------------------------------
 // Per-art parameters.
 //
-// Every art has, for free, a per-art COLOUR theme (primary, secondary, amount)
-// consumed by the Stage's duotone colour grade. Arts may ALSO declare their own
-// `static params` (range/number/color) which they read via setParams() — e.g.
-// the pattern style's size/rotation/padding/distance.
-//
-// mergedArtParams() resolves the effective values: art defaults + colour
-// defaults, overridden by anything the user has set in state.artParams[id].
+// Every art has, for free, a per-art COLOUR theme (primary, secondary,
+// background, amount) consumed by the Stage's chroma-preserving duotone grade.
+// Arts may ALSO declare their own `static params` (range/number/color) read via
+// setParams() — e.g. the pattern style's size/rotation/padding/distance.
 // ---------------------------------------------------------------------------
 
-// Tasteful default primary/secondary per art (shadow → highlight).
+// Default [primary, secondary, background] per art (shadow → highlight → ground).
 const COLOR_DEFAULTS = {
-  'data-pigments': ['#0a1430', '#ffd36b'],
-  'liquid-light': ['#0a1a3a', '#ff9e6b'],
-  'sliced-light': ['#04121a', '#7fe0ff'],
-  'particle-flow': ['#101f38', '#ffb36b'],
-  'data-threads': ['#0a1020', '#6bd0ff'],
-  'pigment-plumes': ['#0a0f1e', '#9ab0ff'],
-  'placeholder-field': ['#070710', '#5fd0ff'],
-  'key-particles': ['#05080f', '#19d3d4'],
-  'key-aura': ['#f7b8c8', '#19d3d4'],
-  'key-pattern': ['#0b0d12', '#19d3d4'],
+  'data-pigments': ['#0a1430', '#ffd36b', '#04060e'],
+  'liquid-light': ['#0a1a3a', '#ff9e6b', '#04060e'],
+  'sliced-light': ['#04121a', '#7fe0ff', '#02060a'],
+  'particle-flow': ['#101f38', '#ffb36b', '#04060e'],
+  'data-threads': ['#0a1020', '#6bd0ff', '#05080f'],
+  'pigment-plumes': ['#0a0f1e', '#9ab0ff', '#070a14'],
+  'placeholder-field': ['#070710', '#5fd0ff', '#04040a'],
+  'key-particles': ['#0a2440', '#19d3d4', '#070a16'],
+  'key-aura': ['#d98aa0', '#ffe6cf', '#b88497'],
+  'key-pattern': ['#0b2a30', '#19d3d4', '#06121a'],
+};
+
+// Default recolour amount per art (how strongly the duotone applies).
+const AMOUNT_DEFAULTS = {
+  'key-aura': 0.85,
+  'key-particles': 0.5,
+  'key-pattern': 0.5,
 };
 
 export function colorDefaults(artId) {
-  return COLOR_DEFAULTS[artId] || ['#0a0f1e', '#7fbfff'];
+  return COLOR_DEFAULTS[artId] || ['#0a0f1e', '#7fbfff', '#05060a'];
 }
 
 /** The colour params every art exposes (rendered as a "Colour" panel section). */
@@ -33,6 +37,7 @@ export function colorParamDefs() {
   return [
     { key: 'colorA', type: 'color', label: 'Primary' },
     { key: 'colorB', type: 'color', label: 'Secondary' },
+    { key: 'colorBg', type: 'color', label: 'Background' },
     { key: 'colorAmount', type: 'range', label: 'Recolour', min: 0, max: 1, step: 0.05 },
   ];
 }
@@ -41,9 +46,10 @@ export function colorParamDefs() {
 export function mergedArtParams(state, artId, ArtClass) {
   const out = {};
   for (const p of ArtClass?.params || []) out[p.key] = p.default;
-  const [a, b] = colorDefaults(artId);
+  const [a, b, bg] = colorDefaults(artId);
   out.colorA = a;
   out.colorB = b;
-  out.colorAmount = 0.35;
+  out.colorBg = bg;
+  out.colorAmount = AMOUNT_DEFAULTS[artId] ?? 0.35;
   return { ...out, ...(state.artParams?.[artId] || {}) };
 }
