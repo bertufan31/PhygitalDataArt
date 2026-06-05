@@ -12,6 +12,7 @@
 import { CommandTypes, EventTypes, makeCommand, makeEvent, Flavours, Products } from '../core/events.js';
 import { listArts, getArt } from '../art/registry.js';
 import { mergedArtParams, colorParamDefs } from '../art/params.js';
+import { el, section } from './dom.js';
 
 const VIEWS = [
   ['head-on', 'View 1 · Head-on'],
@@ -37,22 +38,6 @@ const RATIO_PRESETS = [
   ['9:16', 90, 160],
 ];
 
-function el(tag, props = {}, children = []) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (k === 'class') node.className = v;
-    else if (k === 'text') node.textContent = v;
-    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
-    else if (v != null) node.setAttribute(k, v);
-  }
-  for (const c of [].concat(children)) if (c != null) node.append(c);
-  return node;
-}
-
-function section(title, body) {
-  return el('section', { class: 'panel-section' }, [el('h2', { text: title }), body]);
-}
-
 export function initControlPanel({ root, state, dispatch, fire }) {
   // Track buttons that need active-state highlighting on refresh().
   const artBtns = new Map();
@@ -62,16 +47,41 @@ export function initControlPanel({ root, state, dispatch, fire }) {
   const flavourBtns = new Map();
 
   // -- Art options -------------------------------------------------------
-  const artRow = el('div', { class: 'btn-grid' });
-  for (const a of listArts()) {
+  // Primary options show as buttons; archived (lower-priority) options are
+  // tucked under a plain "Archive" text disclosure, collapsed by default.
+  const makeArtBtn = (a) => {
     const b = el('button', {
       class: 'opt',
       text: a.label,
       onclick: () => dispatch(makeCommand(CommandTypes.SET_ART, { artId: a.id })),
     });
-    artBtns.set(a.id, b);
-    artRow.append(b);
-  }
+    artBtns.set(a.id, b); // map holds every art (primary + archived) for highlighting
+    return b;
+  };
+  const allArts = listArts();
+  const artRow = el('div', { class: 'btn-grid' }, allArts.filter((a) => !a.archived).map(makeArtBtn));
+
+  const archivedArts = allArts.filter((a) => a.archived);
+  const archiveRegion = el('div', { class: 'archive-region', id: 'art-archive' }, [
+    el('div', { class: 'btn-grid' }, archivedArts.map(makeArtBtn)),
+  ]);
+  const startOpen = archivedArts.some((a) => a.id === state.artId); // reveal if active art is archived
+  archiveRegion.hidden = !startOpen;
+  const archiveToggle = el('button', {
+    class: 'archive-toggle',
+    type: 'button',
+    'aria-expanded': String(startOpen),
+    'aria-controls': 'art-archive',
+    text: 'Archive',
+    onclick: () => {
+      const open = archiveRegion.hidden;
+      archiveRegion.hidden = !open;
+      archiveToggle.setAttribute('aria-expanded', String(open));
+    },
+  });
+  const artBody = archivedArts.length
+    ? el('div', { class: 'stack' }, [artRow, el('div', { class: 'archive' }, [archiveToggle, archiveRegion])])
+    : artRow;
 
   // -- Mockup views ------------------------------------------------------
   const viewRow = el('div', { class: 'btn-grid' });
@@ -244,10 +254,13 @@ export function initControlPanel({ root, state, dispatch, fire }) {
         el('h1', { text: 'PhygitalDataArt' }),
         el('p', { class: 'subtitle', text: 'Control booth' }),
       ]),
-      el('a', { class: 'display-link', href: './index.html', target: '_blank', rel: 'noopener', text: 'Open display ↗' }),
+      el('div', { class: 'header-links' }, [
+        el('a', { class: 'display-link', href: './brands.html', text: 'Brands ↗' }),
+        el('a', { class: 'display-link', href: './index.html', target: '_blank', rel: 'noopener', text: 'Open display ↗' }),
+      ]),
     ]),
     el('div', { class: 'panel-grid' }, [
-      section('Art options', artRow),
+      section('Art options', artBody),
       section('Colour', colourBody),
       artSettingsSection,
       section('Mockup view', viewRow),

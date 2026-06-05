@@ -10,4 +10,3 @@ import './pigmentPlumes.js';
 import './keyParticles.js';
 import './keyAura.js';
 import './keyPattern.js';
-import './placeholderField.js';

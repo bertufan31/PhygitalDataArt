@@ -93,6 +93,7 @@ const fragmentShader = /* glsl */ `
 export class KeyAura extends BaseArt {
   static id = 'key-aura';
   static label = 'Key Aura';
+  static archived = true; // lower-priority — tucked under the Archive disclosure
   static params = [
     { key: 'keySize', type: 'range', label: 'Key size', min: 0.3, max: 0.95, step: 0.05, default: 0.55 },
   ];

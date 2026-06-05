@@ -21,7 +21,11 @@ export function getArt(id) {
   return arts.get(id);
 }
 
-/** @returns {{id:string,label:string}[]} ordered list for the control panel. */
+/**
+ * Ordered list for the UIs. `archived` flags lower-priority options the control
+ * panel tucks under its "Archive" disclosure (and the quick menu omits).
+ * @returns {{id:string,label:string,archived:boolean}[]}
+ */
 export function listArts() {
-  return [...arts.values()].map((A) => ({ id: A.id, label: A.label }));
+  return [...arts.values()].map((A) => ({ id: A.id, label: A.label, archived: !!A.archived }));
 }

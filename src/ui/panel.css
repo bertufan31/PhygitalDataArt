@@ -124,6 +124,45 @@ body {
   font-size: 12px;
 }
 
+/* --- Archive disclosure (plain underlined text, no button chrome) ------ */
+.archive-toggle {
+  align-self: flex-start;
+  margin: 2px 0 0 2px;
+  padding: 0;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.archive-toggle:hover {
+  color: var(--fg);
+}
+.archive-toggle::after {
+  content: " ▾";
+  font-size: 9px;
+  text-decoration: none;
+}
+.archive-toggle[aria-expanded="true"]::after {
+  content: " ▴";
+}
+.archive-region[hidden] {
+  display: none;
+}
+.archive-region {
+  margin-top: 10px;
+}
+
+/* --- Header links ------------------------------------------------------ */
+.header-links {
+  display: flex;
+  gap: 8px;
+}
+
 /* --- DJ pads ----------------------------------------------------------- */
 .pad-grid {
   display: grid;
@@ -256,6 +295,57 @@ body {
   border: 1px solid var(--border);
   border-radius: 8px;
   cursor: pointer;
+}
+
+/* --- Brand CMS --------------------------------------------------------- */
+.swatch-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.swatch--lg {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+.asset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  font-size: 13px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+}
+.asset-name {
+  flex: 1 1 auto;
+}
+.asset-kind {
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.asset-link {
+  font-size: 12px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.asset-link:hover {
+  text-decoration: underline;
+}
+.brand-text,
+.brand-input {
+  width: 100%;
+  padding: 9px 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
 }
 
 /* --- Feed -------------------------------------------------------------- */

@@ -15,7 +15,6 @@ const COLOR_DEFAULTS = {
   'particle-flow': ['#101f38', '#ffb36b', '#04060e'],
   'data-threads': ['#0a1020', '#6bd0ff', '#05080f'],
   'pigment-plumes': ['#0a0f1e', '#9ab0ff', '#070a14'],
-  'placeholder-field': ['#070710', '#5fd0ff', '#04040a'],
   'key-particles': ['#0a2440', '#19d3d4', '#070a16'],
   'key-aura': ['#d98aa0', '#ffe6cf', '#b88497'],
   'key-pattern': ['#0b2a30', '#19d3d4', '#06121a'],

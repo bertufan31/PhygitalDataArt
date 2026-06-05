@@ -16,6 +16,7 @@ export default defineConfig({
       input: {
         display: resolve(__dirname, 'index.html'),
         control: resolve(__dirname, 'control.html'),
+        brands: resolve(__dirname, 'brands.html'),
       },
     },
   },

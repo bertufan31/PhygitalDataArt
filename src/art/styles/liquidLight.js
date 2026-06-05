@@ -70,6 +70,7 @@ const fragmentShader = /* glsl */ `
 export class LiquidLight extends BaseArt {
   static id = 'liquid-light';
   static label = 'Liquid Light';
+  static archived = true; // lower-priority — tucked under the Archive disclosure
 
   init(ctx) {
     this.renderer = ctx.renderer;

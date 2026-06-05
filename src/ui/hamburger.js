@@ -49,12 +49,15 @@ export function initHamburger({ state, dispatch }) {
   };
 
   function render() {
+    // Quick menu shows primary options only; archived ones stay in the full panel.
     rows.art.replaceChildren(
-      ...listArts().map((a) =>
-        button(a.label, state.artId === a.id, () =>
-          dispatch(makeCommand(CommandTypes.SET_ART, { artId: a.id })),
+      ...listArts()
+        .filter((a) => !a.archived || a.id === state.artId)
+        .map((a) =>
+          button(a.label, state.artId === a.id, () =>
+            dispatch(makeCommand(CommandTypes.SET_ART, { artId: a.id })),
+          ),
         ),
-      ),
     );
     rows.view.replaceChildren(
       ...VIEWS.map(([id, label]) =>

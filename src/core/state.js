@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { CommandTypes } from './events.js';
+import { defaultBrands } from './brands.js';
 
 const STORAGE_KEY = 'pda-state-v1';
 
@@ -23,6 +24,8 @@ const DEFAULT_STATE = {
   prism: { cols: 96, rows: 54, widthFill: 0.85, heightFill: 0.85, depth: 0.12, rise: 0.32, smoothing: 0.32 }, // LED-prism grid + geometry + spring time
   artParams: {}, // per-art settings: { [artId]: { key: value } } (colours + style knobs)
   sim: { running: true, rate: 1.0 }, // fake-data engine on/off + speed multiplier
+  brands: defaultBrands(), // brand CMS source-of-truth (palette/logos/imagery/rules)
+  activeBrandId: 'iqos', // brand currently in focus in the CMS
 };
 
 export function defaultState() {
@@ -37,6 +40,11 @@ export function loadState() {
       // added later don't break old saves.
       const saved = JSON.parse(raw);
       const base = structuredClone(DEFAULT_STATE);
+      // Per-brand shallow merge so newly-seeded brand fields survive old saves.
+      const brands = {};
+      for (const id of Object.keys(base.brands)) {
+        brands[id] = { ...base.brands[id], ...(saved.brands?.[id] || {}) };
+      }
       return {
         ...base,
         ...saved,
@@ -44,6 +52,7 @@ export function loadState() {
         prism: { ...base.prism, ...saved.prism },
         sim: { ...base.sim, ...saved.sim },
         artParams: { ...(saved.artParams || {}) },
+        brands,
       };
     }
   } catch {
@@ -92,6 +101,14 @@ export function applyCommand(state, cmd) {
     case CommandTypes.SET_SIM:
       state.sim = { ...state.sim, ...cmd.data };
       break;
+    case CommandTypes.SET_ACTIVE_BRAND:
+      state.activeBrandId = cmd.data.brandId;
+      break;
+    case CommandTypes.SET_BRAND: {
+      const { brandId, patch } = cmd.data;
+      state.brands = { ...state.brands, [brandId]: { ...state.brands[brandId], ...patch } };
+      break;
+    }
     case CommandTypes.SYNC_STATE:
       Object.assign(state, cmd.data);
       break;
