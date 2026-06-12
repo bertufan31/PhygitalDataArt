@@ -16,6 +16,7 @@ const COLOR_DEFAULTS = {
   'data-threads': ['#0a1020', '#6bd0ff', '#05080f'],
   'pigment-plumes': ['#0a0f1e', '#9ab0ff', '#070a14'],
   'key-particles': ['#0a2440', '#19d3d4', '#070a16'],
+  'presence-field': ['#06131f', '#19d3d4', '#04070d'],
   'key-aura': ['#d98aa0', '#ffe6cf', '#b88497'],
   'key-pattern': ['#0b2a30', '#19d3d4', '#06121a'],
 };
