@@ -6,8 +6,8 @@
 // depth (3D) comes from the emblem's distance field or, for brand forms, a
 // clean extruded slab. Behaviours:
 //   • BRAND MORPH — particles flow between forms (emblem ↔ ZYN ↔ VEEV) with a
-//                 smooth cross-morph from wherever they currently are; the spin
-//                 settles facing front so logos read. Brands can auto-cycle
+//                 smooth cross-morph from wherever they currently are; every
+//                 form keeps the same rotation. Brands can auto-cycle
 //                 (display-driven, pausable like the data feed).
 //   • MOVEMENT  — a subtle per-particle depth breathing (Drift) gives life
 //                 without touching the 2D outline.
@@ -32,7 +32,7 @@ const vertexShader = /* glsl */ `
   attribute float aPhase;
   attribute float aSize;
   attribute vec3 aTarget;                 // morph destination (next form) for this point
-  uniform float uTime, uEnergy, uTwinkle, uPixel, uSizeScale, uMorph, uDrift, uLock;
+  uniform float uTime, uEnergy, uTwinkle, uPixel, uSizeScale, uMorph, uDrift;
   uniform vec4 uPointer;                  // xy = pos (art space), z = eased presence, w = reach
   uniform vec4 uFxPos[FX_MAX];
   uniform vec3 uFxColor[FX_MAX];
@@ -44,8 +44,8 @@ const vertexShader = /* glsl */ `
     vec3 pos = mix(position, aTarget, uMorph);       // previous form → next form
 
     // MOVEMENT: per-particle depth breathing only — the 2D silhouette is never
-    // deformed, so the emblem/logos stay crisp. Calmer once locked on a brand.
-    pos.z += sin(uTime * 0.5 + aPhase * 6.2831) * uDrift * 0.07 * (1.0 - 0.5 * uLock);
+    // deformed, so the emblem/logos stay crisp.
+    pos.z += sin(uTime * 0.5 + aPhase * 6.2831) * uDrift * 0.07;
 
     // TOUCH: gentle anti-gravity — particles ease away from the pointer and
     // ease back (uPointer.z is temporally smoothed on the CPU).
@@ -120,7 +120,6 @@ export class KeyParticles extends BaseArt {
     this.branded = false; // current form is a brand silhouette
     this.morph = 1; // eased cross-morph: position(prev form) → aTarget(next form)
     this.morphTarget = 1;
-    this._lock = 0; // eased "locked on a brand" amount (settles spin/facing)
     this._pX = 0; this._pY = 0; this._pActive = false; this._pEase = 0; // pointer smoothing
     this.energy = new Eased(0.5, { max: 3, decay: 0.6, rise: 1.8 });
     // Spawn effects ON the active shape (it's thin; random points would miss it).
@@ -138,7 +137,6 @@ export class KeyParticles extends BaseArt {
       uPixel: { value: this.size.height / 600 },
       uSizeScale: { value: 1 },
       uMorph: { value: 1 },
-      uLock: { value: 0 },
       uDrift: { value: 0.35 },
       uPointer: { value: new THREE.Vector4(0, 0, 0, 0.7) },
       uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
@@ -280,21 +278,15 @@ export class KeyParticles extends BaseArt {
     this.time += dt;
     this.fx.update(dt);
     this.morph += (this.morphTarget - this.morph) * Math.min(1, dt * 2.2); // smooth ease
-    this._lock += ((this.branded ? 1 : 0) - this._lock) * Math.min(1, dt * 2.0);
-    // Spin while it's the emblem; settle facing front as it locks on a brand
-    // form, so the logo reads cleanly.
-    this.points.rotation.y += dt * this.spin * (1 - this._lock);
+    // Every form — emblem or brand logo — rotates at the same pace.
+    this.points.rotation.y += dt * this.spin;
     this.points.rotation.y %= Math.PI * 2;
-    if (this._lock > 0.01) {
-      this.points.rotation.y = THREE.MathUtils.lerp(this.points.rotation.y, 0, Math.min(1, dt * 2.5 * this._lock));
-    }
     // Pointer smoothing: eased presence + eased position (no popping).
     const p = this.uniforms.uPointer.value;
     this._pEase += ((this._pActive ? 1 : 0) - this._pEase) * Math.min(1, dt * 5);
     p.x += (this._pX - p.x) * Math.min(1, dt * 10);
     p.y += (this._pY - p.y) * Math.min(1, dt * 10);
     p.z = this._pEase;
-    this.uniforms.uLock.value = this._lock;
     this.uniforms.uTime.value = this.time;
     this.uniforms.uMorph.value = this.morph;
     this.uniforms.uEnergy.value = this.energy.update(dt);

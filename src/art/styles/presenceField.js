@@ -66,18 +66,21 @@ const vertexShader = /* glsl */ `
     }
 
     // PRESENCE: climb the mask gradient → particles are drawn toward the
-    // visitor's silhouette; pick up a soft glow inside it.
+    // visitor's silhouette; pick up a soft glow inside it. Each particle eases
+    // into the attraction over its own life (settle), so the cloud visibly
+    // FLOWS into the shape instead of snapping — organic, not jumpy.
     float presence = 0.0;
     if (uMaskOn > 0.001) {
       vec2 muv = pos * 0.5 + 0.5;
-      float e = 0.022;
+      float e = 0.03;
       float m  = texture2D(uMask, muv).r;
       vec2 g = vec2(
         texture2D(uMask, muv + vec2(e, 0.0)).r - texture2D(uMask, muv - vec2(e, 0.0)).r,
         texture2D(uMask, muv + vec2(0.0, e)).r - texture2D(uMask, muv - vec2(0.0, e)).r
       );
-      pos += g * uPull * uMaskOn * 0.9;
-      presence = m * uMaskOn;
+      float settle = smoothstep(0.0, 0.7, phase);   // ease in across the particle's life
+      pos += g * uPull * uMaskOn * 0.9 * settle;
+      presence = m * uMaskOn * settle;
     }
 
     vec3 baseCol = palette(aMeta.y + uPaletteShift);
@@ -180,7 +183,9 @@ export class PresenceField extends BaseArt {
     this.workCtx = this.workCanvas.getContext('2d', { willReadFrequently: true });
     this._bgRef = null; // empty-scene reference pixels
     this._smooth = new Float32Array(this.maskW * this.maskH); // temporal smoothing
+    this._blurTmp = new Float32Array(this.maskW * this.maskH); // first blur pass
     this._maskImage = this.maskCtx.createImageData(this.maskW, this.maskH);
+    this._lastActive = -Infinity; // last time real presence was seen (for idle return)
 
     this.uniforms = {
       uTime: { value: 0 },
@@ -290,7 +295,9 @@ export class PresenceField extends BaseArt {
   }
 
   // Live frame → presence mask: soft-thresholded background diff, temporally
-  // smoothed, lightly blurred — then uploaded as the attraction texture.
+  // smoothed (slowly — organic, never jumpy), double-blurred for smooth
+  // attraction gradients — then uploaded as the attraction texture. Also tracks
+  // overall activity so the piece can return to its idle flow when alone.
   _updateMask() {
     if (!this._bgRef || !this._drawVideo()) return;
     const cur = this.workCtx.getImageData(0, 0, this.maskW, this.maskH).data;
@@ -298,14 +305,37 @@ export class PresenceField extends BaseArt {
     const sm = this._smooth;
     const W = this.maskW, H = this.maskH;
     const t = this.threshold;
+    let activity = 0;
     for (let i = 0, p = 0; i < sm.length; i++, p += 4) {
       const diff = (Math.abs(cur[p] - bg[p]) + Math.abs(cur[p + 1] - bg[p + 1]) + Math.abs(cur[p + 2] - bg[p + 2])) / 765;
       let x = (diff - t) / 0.22;
       x = x < 0 ? 0 : x > 1 ? 1 : x;
       const v = x * x * (3 - 2 * x); // soft knee
-      sm[i] += (v - sm[i]) * 0.35; // temporal smoothing (kills flicker)
+      sm[i] += (v - sm[i]) * 0.15; // slow temporal smoothing (organic motion)
+      activity += sm[i];
     }
-    // light 3×3 box blur → smooth gradients for the shader to climb
+    if (activity / sm.length > 0.015) this._lastActive = this.time; // someone is here
+    // two 3×3 box-blur passes → soft, wide gradients for the shader to climb
+    const blur = (src, dst) => {
+      for (let y = 0; y < H; y++) {
+        for (let x = 0; x < W; x++) {
+          let acc = 0, cnt = 0;
+          for (let dy = -1; dy <= 1; dy++) {
+            const yy = y + dy;
+            if (yy < 0 || yy >= H) continue;
+            for (let dx = -1; dx <= 1; dx++) {
+              const xx = x + dx;
+              if (xx < 0 || xx >= W) continue;
+              acc += src[yy * W + xx];
+              cnt++;
+            }
+          }
+          dst[y * W + x] = acc / cnt;
+        }
+      }
+    };
+    const tmp = this._blurTmp;
+    blur(sm, tmp);
     const out = this._maskImage.data;
     for (let y = 0; y < H; y++) {
       for (let x = 0; x < W; x++) {
@@ -316,7 +346,7 @@ export class PresenceField extends BaseArt {
           for (let dx = -1; dx <= 1; dx++) {
             const xx = x + dx;
             if (xx < 0 || xx >= W) continue;
-            acc += sm[yy * W + xx];
+            acc += tmp[yy * W + xx];
             cnt++;
           }
         }
@@ -363,8 +393,10 @@ export class PresenceField extends BaseArt {
     if (this._calibAt && this.time >= this._calibAt) { this._calibrate(); this._calibAt = 0; }
     this._frameToggle = !this._frameToggle;
     if (this.phase === 'live' && this._frameToggle) this._updateMask(); // every 2nd frame
-    const maskOn = this.phase === 'live' && this._bgRef ? 1 : 0;
-    this._maskEase += (maskOn - this._maskEase) * Math.min(1, dt * 2);
+    // Presence engages while someone is there; after 5s with no action the
+    // cloud gently releases back to its idle Particle Flow state.
+    const engaged = this.phase === 'live' && this._bgRef && (this.time - this._lastActive) < 5;
+    this._maskEase += ((engaged ? 1 : 0) - this._maskEase) * Math.min(1, dt * 1.2);
     this.uniforms.uMaskOn.value = this._maskEase;
 
     this.uniforms.uTime.value = this.time;
