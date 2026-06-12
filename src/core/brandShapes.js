@@ -41,6 +41,32 @@ export function hasBrandSilhouette(brandId) {
   return !!BRAND_SILHOUETTES[brandId];
 }
 
+function segDist(px, py, ax, ay, bx, by) {
+  const ex = bx - ax, ey = by - ay;
+  const wx = px - ax, wy = py - ay;
+  const t = Math.max(0, Math.min(1, (wx * ex + wy * ey) / (ex * ex + ey * ey + 1e-12)));
+  const dx = wx - ex * t, dy = wy - ey * t;
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Signed distance to the brand silhouette (negative inside), in the same
+ * normalized ~[-0.5,0.5] space as sampleBrandPoints. Used to build the
+ * "obstacle in the wind" field. Returns null when the brand has no silhouette.
+ */
+export function brandSignedDistance(brandId, x, y) {
+  const sil = BRAND_SILHOUETTES[brandId];
+  if (!sil) return null;
+  let dmin = Infinity;
+  for (const poly of sil.polys) {
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const d = segDist(x, y, poly[j][0], poly[j][1], poly[i][0], poly[i][1]);
+      if (d < dmin) dmin = d;
+    }
+  }
+  return inside(x, y, sil.polys) ? -dmin : dmin;
+}
+
 /**
  * Rejection-sample n points inside the brand silhouette.
  * @returns {Float32Array | null} [x,y,...] in ~[-0.5,0.5] (y up), or null.

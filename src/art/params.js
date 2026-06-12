@@ -19,6 +19,7 @@ const COLOR_DEFAULTS = {
   'presence-field': ['#06131f', '#19d3d4', '#04070d'],
   'key-aura': ['#d98aa0', '#ffe6cf', '#b88497'],
   'key-pattern': ['#0b2a30', '#19d3d4', '#06121a'],
+  'slipstream': ['#0a1c3a', '#8fe3ff', '#05080f'],
 };
 
 // Default recolour amount per art (how strongly the duotone applies).
@@ -26,6 +27,7 @@ const AMOUNT_DEFAULTS = {
   'key-aura': 0, // colours itself from the 3-stop gradient
   'key-particles': 0.5,
   'key-pattern': 0.5,
+  'slipstream': 0.8, // wind streaks are near-monochrome → duotone carries the brand colour
 };
 
 export function colorDefaults(artId) {

@@ -8,6 +8,7 @@ import './particleFlow.js';
 import './dataThreads.js';
 import './pigmentPlumes.js';
 import './keyParticles.js';
+import './slipstream.js';
 import './presenceField.js';
 import './keyAura.js';
 import './keyPattern.js';
