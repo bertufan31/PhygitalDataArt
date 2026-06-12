@@ -10,7 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { CommandTypes } from './events.js';
-import { defaultBrands } from './brands.js';
+import { defaultBrands, BRANDS_VERSION } from './brands.js';
 
 const STORAGE_KEY = 'pda-state-v1';
 
@@ -25,6 +25,7 @@ const DEFAULT_STATE = {
   artParams: {}, // per-art settings: { [artId]: { key: value } } (colours + style knobs)
   sim: { running: true, rate: 1.0 }, // fake-data engine on/off + speed multiplier
   brands: defaultBrands(), // brand CMS source-of-truth (palette/logos/imagery/rules)
+  brandsV: BRANDS_VERSION, // seed version — saved brands are dropped when the seed changes
   activeBrandId: 'iqos', // brand currently in focus in the CMS
   brandCycle: { running: true, period: 12 }, // auto brand rotation (pausable, like sim)
 };
@@ -41,10 +42,13 @@ export function loadState() {
       // added later don't break old saves.
       const saved = JSON.parse(raw);
       const base = structuredClone(DEFAULT_STATE);
-      // Per-brand shallow merge so newly-seeded brand fields survive old saves.
+      // Per-brand shallow merge so newly-seeded brand fields survive old saves —
+      // unless the seed itself changed (version bump): then the fresh seed wins,
+      // otherwise stale saved palettes would mask the new brand baselines.
       const brands = {};
+      const stale = saved.brandsV !== base.brandsV;
       for (const id of Object.keys(base.brands)) {
-        brands[id] = { ...base.brands[id], ...(saved.brands?.[id] || {}) };
+        brands[id] = stale ? base.brands[id] : { ...base.brands[id], ...(saved.brands?.[id] || {}) };
       }
       return {
         ...base,
@@ -55,6 +59,7 @@ export function loadState() {
         brandCycle: { ...base.brandCycle, ...saved.brandCycle },
         artParams: { ...(saved.artParams || {}) },
         brands,
+        brandsV: base.brandsV,
       };
     }
   } catch {

@@ -8,12 +8,16 @@
 // the rest of app state (see core/state.js). Keep this a plain data model — no
 // rendering here — so the CMS and the art pipeline stay decoupled.
 //
-// Colour provenance: ZYN #00A9E0 and VEEV #393E44 are sampled from the supplied
-// logo files (authoritative). Remaining tones are sensible starting points for
-// the team to refine in the CMS, NOT official brand values.
+// Colour provenance: ZYN #00A9E0 is sampled from the supplied logo file. VEEV
+// uses the brand baseline supplied by the team: Deep Purple #221551, Pure White
+// #FFFFFF, Lilac #B89FEF, Light Purple #332072 (V mark = Light Purple on a
+// Lilac ground). IQOS tones are editable starting points.
 // ---------------------------------------------------------------------------
 
 export const BRAND_IDS = ['iqos', 'zyn', 'veev'];
+
+// Bump when the SEED changes so saved (stale) brand data is refreshed on load.
+export const BRANDS_VERSION = 2;
 
 // Resolve a /public/brands asset against the Vite base (works under the
 // GitHub-Pages project subpath too).
@@ -48,7 +52,10 @@ const SEED = {
   veev: {
     id: 'veev',
     label: 'VEEV',
-    palette: { primary: '#393E44', secondary: '#00B7CE', background: '#16191D', accents: ['#00B7CE'] },
+    // Brand baseline: V mark in Light Purple on a Lilac ground, shaded with
+    // Deep Purple; Pure White as the supporting tone. amount 1.0 → exact brand
+    // colour on the V (no white sparkle bleed).
+    palette: { primary: '#332072', secondary: '#FFFFFF', background: '#B89FEF', shadow: '#221551', accents: ['#221551', '#FFFFFF'], amount: 1.0 },
     logos: [
       { id: 'wordmark', label: 'VEEV wordmark', kind: 'vector', src: asset('veev-global.pdf') },
       { id: 'v-shape', label: 'VEEV “V” mark', kind: 'image', src: asset('veev-vshape.pdf') },
@@ -81,5 +88,9 @@ export function getBrand(brands, id) {
 // (no rendering-engine changes). primary → highlight, background → shadow/ground.
 export function brandColorParams(brand) {
   const p = brand.palette;
-  return { colorA: p.background, colorB: p.primary, colorBg: p.background, colorAmount: 0.7 };
+  // `shadow` (optional) is the duotone's dark end — needed when the background
+  // is light, or the form's mid-tones dilute into the ground. `amount` lets a
+  // brand demand exact colour fidelity (1 = fully themed); 0.7 keeps a touch of
+  // the art's own luminance sparkle.
+  return { colorA: p.shadow ?? p.background, colorB: p.primary, colorBg: p.background, colorAmount: p.amount ?? 0.7 };
 }
