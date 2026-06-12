@@ -242,6 +242,15 @@ export function initControlPanel({ root, state, dispatch, fire }) {
       const input = el('input', { type: 'color', class: 'color-input', value, oninput: (e) => commit(e.target.value) });
       return el('label', { class: 'field' }, [el('span', { text: def.label }), input]);
     }
+    if (def.type === 'select') {
+      const row = el('div', { class: 'btn-grid' }, (def.options || []).map((opt) =>
+        el('button', {
+          class: `opt opt--sm${String(value) === String(opt.value) ? ' active' : ''}`,
+          text: opt.label,
+          onclick: () => { commit(opt.value); rebuildArtUI(); }, // refresh active highlight
+        })));
+      return el('div', { class: 'field' }, [el('span', { text: def.label }), row]);
+    }
     const isNum = def.type === 'number';
     const valEl = el('span', { class: 'rate-label' });
     const input = el('input', {

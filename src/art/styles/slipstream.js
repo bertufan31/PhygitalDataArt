@@ -39,8 +39,14 @@ import { hasBrandSilhouette, brandSignedDistance } from '../../core/brandShapes.
 const FIELD_W = 200;      // baked velocity-field grid (kept small; rebaked on brand change)
 const FIELD_H = 116;
 const OBS = 1.2;          // body fills ~60% of frame height
-const OBS_CX = -0.16;     // centred slightly left so the wake streams off to the right
+const OBS_OFF = 0.16;     // body sits slightly upwind so the wake streams off-frame
 const BAND = 0.22;        // how far the body's influence reaches into the flow
+
+// Selectable wind directions (logos always stay upright; only the wind turns).
+const DIRS = { right: [1, 0], left: [-1, 0], up: [0, 1], down: [0, -1] };
+
+// Per-glyph readability scale: wide wordmarks need to occupy more of the frame.
+const GLYPH_SCALE = { zyn: 1.75, veev: 1.15 };
 
 // Particles advect quickly left→right; the feedback trail buffer smears their
 // motion into flowing wind streaks. The baked field routes them around the body.
@@ -49,6 +55,7 @@ const vertexShader = /* glsl */ `
   attribute vec2 aSeed;            // x = phase along the tunnel, y = entry lane
   attribute vec3 aRand;            // speed, size, sparkle
   uniform float uTime, uAspect, uWind, uMix, uTurb, uWake, uFlash, uStreak;
+  uniform vec2  uDir;              // wind direction (unit, cardinal)
   uniform vec3  uGust;             // x = sweep position, y = intensity, z = width
   uniform sampler2D uFieldA, uFieldB;
   varying float vBright;
@@ -64,10 +71,11 @@ const vertexShader = /* glsl */ `
   void main(){
     float speed = aRand.x;
     float ph = fract(aSeed.x + uTime * speed * uWind * 0.28);  // travel across → motion smear
-    vec2 pos = vec2(-1.2 + ph * 2.4, aSeed.y);                 // advect left → right, looping
+    vec2 perp = vec2(-uDir.y, uDir.x);
+    vec2 pos = uDir * (-1.25 + ph * 2.5) + perp * aSeed.y;     // advect along the wind, looping
 
     // Integrate a few steps of the baked flow so the stream routes around the
-    // body (cheap — texture taps only), then fray with turbulence + wake once.
+    // body (cheap — texture taps only).
     float rim = 0.0, spd = 1.0;
     for (int s = 0; s < 6; s++) {
       vec4 f = field(pos);
@@ -75,41 +83,61 @@ const vertexShader = /* glsl */ `
       rim = max(rim, f.w);
       pos += f.xy * 0.026;
     }
-    float behind = smoothstep(${OBS_CX.toFixed(2)}, ${OBS_CX.toFixed(2)} + 1.0, pos.x);
+    // Turbulence frays the stream, and the wake only kicks in well PAST the
+    // body (so it never fuzzes the glyph itself).
+    float along = dot(pos, uDir);
+    float behind = smoothstep(0.42, 1.05, along + ${OBS_OFF.toFixed(2)});
     pos += (curl(pos * 2.6 + uTime * 0.35) * uTurb
           + curl(pos * 5.0 - uTime * 0.7) * uWake * behind) * 0.13;
 
-    // GUST: a bright vertical band sweeping across the tunnel (visitor events).
-    float gust = exp(-pow((pos.x - uGust.x) / max(uGust.z, 1e-3), 2.0)) * uGust.y;
+    // Particles still inside the body vanish → the glyph stays a clean void.
+    float keep = smoothstep(-0.02, 0.015, field(pos).z);
+
+    // GUST: a bright band sweeping along the wind (visitor events).
+    float gust = exp(-pow((along - uGust.x) / max(uGust.z, 1e-3), 2.0)) * uGust.y;
     float edge = clamp(rim, 0.0, 1.0);
     // Low per-point alpha + a long trail buffer = luminous streamlines over dark
-    // gaps. Calm flow is faint; speed, edge-rim, wake and gusts glow.
-    vBright = (0.5 + 0.75 * spd + edge * 1.9 + gust * 1.8 + uFlash) * (0.7 + 0.6 * aRand.z);
-    vAlpha = clamp(0.035 + 0.10 * spd + edge * 0.5 + gust * 0.6, 0.0, 1.0);
+    // gaps. Calm flow is faint; speed, edge-rim and gusts glow.
+    vBright = (0.5 + 0.75 * spd + edge * 1.7 + gust * 1.8 + uFlash * 0.5) * (0.7 + 0.6 * aRand.z);
+    vAlpha = clamp(0.035 + 0.10 * spd + edge * 0.6 + gust * 0.6, 0.0, 1.0) * keep;
     gl_Position = vec4(pos, 0.0, 1.0);
-    gl_PointSize = (0.8 + 1.3 * spd + edge * 2.2 + gust * 2.0) * uStreak * aRand.y;
+    gl_PointSize = (0.8 + 1.3 * spd + edge * 1.3 + gust * 2.0) * uStreak * aRand.y;
   }
 `;
 
 const fragmentShader = /* glsl */ `
   precision highp float;
+  uniform float uFlash;
+  uniform vec3 uFlashColor;
   varying float vBright;
   varying float vAlpha;
   void main(){
     vec2 c = gl_PointCoord - 0.5;
     float a = smoothstep(0.5, 0.0, length(c)) * vAlpha;
     // Cool-white streak; the duotone grade tints it to the active brand.
-    gl_FragColor = vec4(vec3(0.62, 0.8, 1.0) * vBright * a, a);
+    vec3 col = vec3(0.62, 0.8, 1.0) * vBright;
+    // Sale / flavour: the whole wind ignites in the event colour. Multiplicative
+    // tint so even the bloomed-white areas turn the colour (additive mixing
+    // alone would wash it out), and saturation survives the duotone grade.
+    col *= mix(vec3(1.0), uFlashColor * 1.7, clamp(uFlash, 0.0, 1.0));
+    gl_FragColor = vec4(col * a, a);
   }
 `;
 
-// Fullscreen fade pass for the motion-blur trail (prev frame × fade).
+// Fullscreen fade pass for the motion-blur trail (prev frame × fade). During a
+// sale/flavour flash it also tints the HISTORY toward the event colour each
+// frame (compounds quickly), so the whole accumulated wind ignites visibly.
 const fadeFragment = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
   uniform sampler2D uTex;
-  uniform float uFade;
-  void main(){ gl_FragColor = texture2D(uTex, vUv) * uFade; }
+  uniform float uFade, uTintAmt;
+  uniform vec3 uTint;
+  void main(){
+    vec3 c = texture2D(uTex, vUv).rgb * uFade;
+    c *= mix(vec3(1.0), uTint * 1.25, uTintAmt);
+    gl_FragColor = vec4(c, 1.0);
+  }
 `;
 const fadeVertex = /* glsl */ `
   varying vec2 vUv;
@@ -123,8 +151,17 @@ export class Slipstream extends BaseArt {
     { key: 'count', type: 'range', label: 'Streaks', min: 20000, max: 200000, step: 10000, default: 70000 },
     { key: 'streak', type: 'range', label: 'Streak size', min: 0.3, max: 3, step: 0.1, default: 1 },
     { key: 'wind', type: 'range', label: 'Wind speed', min: 0.2, max: 2.5, step: 0.1, default: 1 },
+    {
+      key: 'direction', type: 'select', label: 'Wind direction', default: 'right',
+      options: [
+        { value: 'right', label: '→ Right' },
+        { value: 'left', label: '← Left' },
+        { value: 'up', label: '↑ Up' },
+        { value: 'down', label: '↓ Down' },
+      ],
+    },
     { key: 'trails', type: 'range', label: 'Trails', min: 0.6, max: 0.97, step: 0.01, default: 0.94 },
-    { key: 'turbulence', type: 'range', label: 'Turbulence', min: 0, max: 0.5, step: 0.02, default: 0.14 },
+    { key: 'turbulence', type: 'range', label: 'Turbulence', min: 0, max: 0.5, step: 0.02, default: 0.08 },
   ];
 
   init(ctx) {
@@ -134,20 +171,24 @@ export class Slipstream extends BaseArt {
     this.time = 0;
     this.count = 70000;
     this.brandId = null;
+    this.dirName = 'right';
+    this._dirV = DIRS.right;
 
-    this.flash = new Eased(0, { max: 1.2, decay: 1.4, rise: 6 });
+    this.flash = new Eased(0, { max: 1.2, decay: 0.7, rise: 6 });
     this.turbBoost = new Eased(0, { max: 0.5, decay: 0.7, rise: 4 });
-    this.gust = { x: -2, v: 0 }; // sweeping vertical gust (visitor)
+    this.gust = { x: -2, v: 0 }; // gust front sweeping along the wind (visitor)
 
     this.uniforms = {
       uTime: { value: 0 },
       uAspect: { value: this.aspect },
       uWind: { value: 1 },
       uMix: { value: 0 },
-      uTurb: { value: 0.14 },
-      uWake: { value: 0.18 },
+      uTurb: { value: 0.08 },
+      uWake: { value: 0.12 },
       uFlash: { value: 0 },
+      uFlashColor: { value: new THREE.Color('#ffd36b') },
       uStreak: { value: 1 },
+      uDir: { value: new THREE.Vector2(1, 0) },
       uGust: { value: new THREE.Vector3(-2, 0, 0.12) },
       uFieldA: { value: null },
       uFieldB: { value: null },
@@ -174,7 +215,10 @@ export class Slipstream extends BaseArt {
     this._trail = [this._makeRT(), this._makeRT()];
     this._cur = 0;
     this.fadeMat = new THREE.ShaderMaterial({
-      uniforms: { uTex: { value: null }, uFade: { value: this.fade } },
+      uniforms: {
+        uTex: { value: null }, uFade: { value: this.fade },
+        uTint: { value: this.uniforms.uFlashColor.value }, uTintAmt: { value: 0 },
+      },
       vertexShader: fadeVertex, fragmentShader: fadeFragment, depthTest: false, depthWrite: false,
     });
     this.fadeScene = new THREE.Scene();
@@ -198,25 +242,29 @@ export class Slipstream extends BaseArt {
   }
 
   // Signed distance to the active brand body in obstacle space (~[-0.5,0.5]).
+  // Glyphs get a per-brand readability scale (wide wordmarks render larger).
   _obstacle(brandId, ox, oy) {
     if (hasBrandSilhouette(brandId)) {
-      const d = brandSignedDistance(brandId, ox, oy);
-      return d == null ? 1 : d;
+      const s = GLYPH_SCALE[brandId] || 1;
+      const d = brandSignedDistance(brandId, ox / s, oy / s);
+      return d == null ? 1 : d * s;
     }
     return emblemDist(ox, oy); // IQOS emblem (analytic)
   }
 
-  // Bake the wind field for `brandId` into `tex`: base wind + go-around / ejection
-  // flow + a rim term, all derived from the body's signed-distance field.
+  // Bake the wind field for `brandId` into `tex`: base wind (current direction)
+  // + go-around / ejection flow + a rim term, from the body's signed distance.
   _bake(brandId, tex) {
     const W = FIELD_W, H = FIELD_H, A = this.aspect;
+    const [dx, dy] = this._dirV;
+    const ocx = -OBS_OFF * dx, ocy = -OBS_OFF * dy;  // body sits slightly upwind
     const sdf = new Float32Array(W * H);
     for (let j = 0; j < H; j++) {
       const cy = ((j + 0.5) / H) * 2 - 1;          // clip y (up), matches texture v
       for (let i = 0; i < W; i++) {
         const cx = ((i + 0.5) / W) * 2 - 1;
-        const ox = ((cx - OBS_CX) * A) / OBS;       // undistorted, centred-left
-        const oy = cy / OBS;
+        const ox = ((cx - ocx) * A) / OBS;          // undistorted (logo stays upright)
+        const oy = (cy - ocy) / OBS;
         sdf[j * W + i] = this._obstacle(brandId, ox, oy);
       }
     }
@@ -229,19 +277,20 @@ export class Slipstream extends BaseArt {
         const jd = sdf[Math.max(0, j - 1) * W + i], ju = sdf[Math.min(H - 1, j + 1) * W + i];
         let nx = ir - il, ny = ju - jd;
         const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;   // outward normal
-        let vx = 1, vy = 0;                                        // base wind →
+        let vx = dx, vy = dy;                                      // base wind
         const influence = d < 0 ? 1 : Math.max(0, 1 - d / BAND);
         if (d < 0) {
-          const push = 1 + -d * 6;                                // eject from inside the body
+          const push = 1 + -d * 7;                                // eject from inside the body
           vx = nx * push; vy = ny * push;
         } else if (influence > 0) {
           const vn = vx * nx + vy * ny;
           if (vn < 0) { vx -= nx * vn * influence; vy -= ny * vn * influence; } // no penetration
           vx += nx * influence * 0.45; vy += ny * influence * 0.45;             // splay around
-          let tx = -ny, ty = nx; if (tx < 0) { tx = -tx; ty = -ty; }            // tangent, +x
+          let tx = -ny, ty = nx;
+          if (tx * dx + ty * dy < 0) { tx = -tx; ty = -ty; }                    // tangent downwind
           vx += tx * influence * 0.5; vy += ty * influence * 0.5;               // edge speed-up
         }
-        const edge = Math.exp(-Math.abs(d) * 9);                  // bright rim along the body
+        const edge = Math.exp(-Math.abs(d) * 14);                 // crisp rim along the body
         data[k * 4] = vx; data[k * 4 + 1] = vy; data[k * 4 + 2] = d; data[k * 4 + 3] = edge;
       }
     }
@@ -286,6 +335,15 @@ export class Slipstream extends BaseArt {
     if (p.wind != null) this.uniforms.uWind.value = p.wind;
     if (p.turbulence != null) this._turb = p.turbulence;
     if (p.trails != null) { this.fade = p.trails; if (this.fadeMat) this.fadeMat.uniforms.uFade.value = p.trails; }
+    if (p.direction != null && p.direction !== this.dirName && DIRS[p.direction]) {
+      this.dirName = p.direction;
+      this._dirV = DIRS[p.direction];
+      this.uniforms.uDir.value.set(this._dirV[0], this._dirV[1]);
+      if (this.fieldTex) { // rebake both slots for the new wind direction
+        this._bake(this.brandId, this.fieldTex[0]);
+        this._bake(this.brandId, this.fieldTex[1]);
+      }
+    }
     if (p.count != null && (p.count | 0) !== this.count) { this.count = p.count | 0; this._buildGeometry(); }
   }
 
@@ -305,7 +363,9 @@ export class Slipstream extends BaseArt {
         break;
       case EventTypes.SALE_MADE:
       case EventTypes.FLAVOUR_SOLD:
-        this.flash.bump(1.2);                       // pressure flash
+        // The wind ignites in the event colour (flavour colour, or warm gold).
+        this.uniforms.uFlashColor.value.set(event.data?.color || '#ffd36b');
+        this.flash.bump(1.2);
         break;
       case EventTypes.PRODUCT_SOLD:
         this.turbBoost.bump(0.5);                   // vortex-shedding burst
@@ -339,6 +399,8 @@ export class Slipstream extends BaseArt {
     }
 
     // Trail feedback: fade previous frame, add this frame's particles on top.
+    // During a flash the fade pass also tints the history toward the event colour.
+    this.fadeMat.uniforms.uTintAmt.value = Math.min(1, this.uniforms.uFlash.value) * 0.16;
     const prev = this._trail[this._cur];
     const next = this._trail[1 - this._cur];
     this.fadeMat.uniforms.uTex.value = prev.texture;
