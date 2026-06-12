@@ -126,6 +126,7 @@ const dotFragment = /* glsl */ `
 export class DataThreads extends BaseArt {
   static id = 'data-threads';
   static label = 'Data Threads';
+  static archived = true; // lower-priority — tucked under the Archive disclosure
 
   init(ctx) {
     this.renderer = ctx.renderer;

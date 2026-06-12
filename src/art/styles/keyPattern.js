@@ -75,6 +75,7 @@ const fragmentShader = /* glsl */ `
 export class KeyPattern extends BaseArt {
   static id = 'key-pattern';
   static label = 'Key Pattern';
+  static archived = true; // lower-priority — tucked under the Archive disclosure
   static params = [
     { key: 'size', type: 'range', label: 'Size', min: 0.2, max: 1.0, step: 0.05, default: 0.7 },
     { key: 'rotation', type: 'range', label: 'Rotation', min: 0, max: 360, step: 5, default: 0 },

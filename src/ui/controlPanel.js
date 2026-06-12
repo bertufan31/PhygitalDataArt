@@ -12,6 +12,7 @@
 import { CommandTypes, EventTypes, makeCommand, makeEvent, Flavours, Products } from '../core/events.js';
 import { listArts, getArt } from '../art/registry.js';
 import { mergedArtParams, colorParamDefs } from '../art/params.js';
+import { listBrands } from '../core/brands.js';
 import { el, section } from './dom.js';
 
 const VIEWS = [
@@ -45,6 +46,7 @@ export function initControlPanel({ root, state, dispatch, fire }) {
   const targetBtns = new Map();
   const frameBtns = new Map();
   const flavourBtns = new Map();
+  const brandBtns = new Map();
 
   // -- Art options -------------------------------------------------------
   // Primary options show as buttons; archived (lower-priority) options are
@@ -93,6 +95,18 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     });
     viewBtns.set(id, b);
     viewRow.append(b);
+  }
+
+  // -- Brand (drives brand morphing + palette/background on the display) -
+  const brandRow = el('div', { class: 'btn-grid' });
+  for (const b of listBrands(state.brands)) {
+    const btn = el('button', {
+      class: 'opt',
+      text: b.label,
+      onclick: () => dispatch(makeCommand(CommandTypes.SET_ACTIVE_BRAND, { brandId: b.id })),
+    });
+    brandBtns.set(b.id, btn);
+    brandRow.append(btn);
   }
 
   // -- Display target ----------------------------------------------------
@@ -261,6 +275,7 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     ]),
     el('div', { class: 'panel-grid' }, [
       section('Art options', artBody),
+      section('Brand', brandRow),
       section('Colour', colourBody),
       artSettingsSection,
       section('Mockup view', viewRow),
@@ -281,6 +296,7 @@ export function initControlPanel({ root, state, dispatch, fire }) {
 
   function refresh() {
     setActive(artBtns, state.artId);
+    setActive(brandBtns, state.activeBrandId);
     setActive(viewBtns, state.viewId);
     setActive(targetBtns, state.targetId);
     setActive(frameBtns, state.frameStyle);

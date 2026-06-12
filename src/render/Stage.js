@@ -18,6 +18,7 @@ import { PrismTarget } from './targets/PrismTarget.js';
 import { ColorGrade } from './ColorGrade.js';
 import { PhotoView } from './PhotoView.js';
 import { ViewManager } from './views/viewManager.js';
+import { getBrand, brandColorParams } from '../core/brands.js';
 
 const ART_BASE_RESOLUTION = 1024;
 
@@ -57,11 +58,32 @@ export class Stage {
     this.views.setAspect(this._frameAspect());
     this.views.setFrameStyle(state.frameStyle || 'gallery');
 
+    this._brandColors = null; // live brand theme, once a brand is explicitly chosen
     this.setArt(state.artId);
     this.setTarget(state.targetId);
     this.setView(state.viewId);
     this.resize();
+    this._initPointer();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  // Forward pointer/touch on the canvas to the active art (in NDC). Used by the
+  // touch-interaction concept; arts that ignore it are unaffected.
+  _initPointer() {
+    this.canvas.style.touchAction = 'none';
+    this._px = 0; this._py = 0; this._pointerDown = false;
+    const ndc = (e) => {
+      const r = this.canvas.getBoundingClientRect();
+      this._px = ((e.clientX - r.left) / r.width) * 2 - 1;
+      this._py = -(((e.clientY - r.top) / r.height) * 2 - 1);
+    };
+    const send = () => this.art && this.art.setPointer(this._px, this._py, this._pointerDown);
+    this.canvas.addEventListener('pointerdown', (e) => { this._pointerDown = true; ndc(e); send(); });
+    this.canvas.addEventListener('pointermove', (e) => { ndc(e); if (this._pointerDown) send(); });
+    const release = () => { this._pointerDown = false; send(); };
+    this.canvas.addEventListener('pointerup', release);
+    this.canvas.addEventListener('pointerleave', release);
+    this.canvas.addEventListener('pointercancel', release);
   }
 
   _frameAspect() {
@@ -86,7 +108,20 @@ export class Stage {
     this.state.artId = ArtClass.id;
     this.grade.setSource(this.art.texture);
     this.grade.setColors(params);
+    if (this._brandColors) this.grade.setColors(this._brandColors); // keep an active brand theme
+    this.art.setBrand(this.state.activeBrandId); // brand-aware arts morph to it
     if (this.target) this.target.setTexture(this.grade.texture);
+  }
+
+  /**
+   * Make a brand the focus: brand-aware arts (e.g. Key Particles) morph toward
+   * its form, and the whole piece is re-themed to the brand palette/background.
+   */
+  setActiveBrand(brandId) {
+    this.state.activeBrandId = brandId;
+    this._brandColors = brandColorParams(getBrand(this.state.brands, brandId));
+    this.grade.setColors(this._brandColors);
+    if (this.art) this.art.setBrand(brandId);
   }
 
   setTarget(targetId) {

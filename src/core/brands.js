@@ -81,5 +81,5 @@ export function getBrand(brands, id) {
 // (no rendering-engine changes). primary → highlight, background → shadow/ground.
 export function brandColorParams(brand) {
   const p = brand.palette;
-  return { colorA: p.background, colorB: p.primary, colorBg: p.background };
+  return { colorA: p.background, colorB: p.primary, colorBg: p.background, colorAmount: 0.7 };
 }
