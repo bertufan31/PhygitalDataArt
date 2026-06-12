@@ -103,12 +103,82 @@ export function initBrandPanel({ root, state, dispatch }) {
     return section('Motion language', el('label', { class: 'field' }, [el('span', { text: 'Feel' }), input]));
   }
 
+  // -- Textures (for the realistic 3D piece) ------------------------------
+  // Multiple uploads per category; images are downscaled to ≤512px data-URLs so
+  // they persist in localStorage and sync over the bus like everything else.
+  const MAX_TEX = 8;
+  const downscale = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const k = Math.min(1, 512 / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.max(1, Math.round(img.width * k));
+        c.height = Math.max(1, Math.round(img.height * k));
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        resolve(c.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  function texGroup(label, cat, brand) {
+    const items = brand.textures?.[cat] || [];
+    const grid = el('div', { class: 'tex-grid' }, [
+      ...items.map((t) => el('div', { class: 'tex-thumb', title: t.name }, [
+        el('img', { src: t.src, alt: t.name }),
+        el('button', {
+          class: 'tex-del', type: 'button', 'aria-label': `Remove ${t.name}`, text: '×',
+          onclick: () => {
+            const cur = active().textures || {};
+            patchBrand({ textures: { ...cur, [cat]: (cur[cat] || []).filter((x) => x.id !== t.id) } });
+            rebuildEditor();
+          },
+        }),
+      ])),
+    ]);
+    const input = el('input', {
+      type: 'file', accept: 'image/*', multiple: '', class: 'tex-input',
+      onchange: async (e) => {
+        const files = [...e.target.files].slice(0, MAX_TEX);
+        const added = [];
+        for (const f of files) {
+          try { added.push({ id: `${Date.now()}-${added.length}`, name: f.name, src: await downscale(f) }); }
+          catch { /* unreadable file — skip */ }
+        }
+        if (added.length) {
+          const cur = active().textures || {};
+          patchBrand({ textures: { ...cur, [cat]: [...(cur[cat] || []), ...added].slice(0, MAX_TEX) } });
+          rebuildEditor();
+        }
+        e.target.value = '';
+      },
+    });
+    return el('div', { class: 'stack' }, [
+      el('span', { class: 'fx-note', text: `${label} — up to ${MAX_TEX}; applied to the Vitrine art's ${cat}` }),
+      grid,
+      input,
+    ]);
+  }
+
+  function texturesSection(brand) {
+    return section('Textures', el('div', { class: 'stack' }, [
+      texGroup('Cube textures', 'cubes', brand),
+      texGroup('Sphere textures', 'spheres', brand),
+    ]));
+  }
+
   let lastBrandId = null;
   function rebuildEditor() {
     const brand = active();
     editor.replaceChildren(
       paletteSection(brand),
       logosSection(brand),
+      texturesSection(brand),
       imagerySection(brand),
       principlesSection(brand),
       motionSection(brand),

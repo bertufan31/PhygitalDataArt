@@ -35,6 +35,7 @@ const SEED = {
       { id: 'emblem', label: 'IQOS emblem', kind: 'sdf', src: null, note: 'Analytic emblem — see core/shape.js' },
     ],
     imagery: [],
+    textures: { cubes: [], spheres: [] }, // CMS uploads for the realistic 3D piece
     principles: ['Warm, precise minimalism', 'Unfold the experience', 'Light treated as a material'],
     motion: { language: 'Smooth, breathing, premium', easing: 'easeInOut' },
   },
@@ -46,6 +47,7 @@ const SEED = {
       { id: 'wordmark', label: 'ZYN wordmark', kind: 'vector', src: asset('zyn-logo.pdf') },
     ],
     imagery: [],
+    textures: { cubes: [], spheres: [] },
     principles: ['Crisp, clean, energetic', 'Bold cyan on deep blue'],
     motion: { language: 'Snappy, modern', easing: 'easeOut' },
   },
@@ -63,6 +65,7 @@ const SEED = {
     imagery: [
       { id: 'v-hero', label: 'V hero shape', src: asset('veev-vshape.pdf') },
     ],
+    textures: { cubes: [], spheres: [] },
     principles: ['Sleek, contemporary', 'The “V” as a hero motif'],
     motion: { language: 'Fluid, directional', easing: 'easeInOut' },
   },

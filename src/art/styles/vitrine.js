@@ -186,6 +186,10 @@ export class Vitrine extends BaseArt {
     this.fill = new THREE.DirectionalLight(0xbfd4ff, 0.35);
     this.fill.position.set(-4, 1.5, 3);
     this.scene.add(this.fill);
+    // Rim/back light — lifts dark materials off a dark room (product-photo style).
+    this.rim = new THREE.DirectionalLight(0xdfe8ff, 0.4);
+    this.rim.position.set(-3, 4.5, -6);
+    this.scene.add(this.rim);
 
     // Room: floor + back wall receive the falling shadows.
     this.floorMat = new THREE.MeshStandardMaterial({ color: 0x14181f, roughness: 0.95 });
@@ -205,25 +209,27 @@ export class Vitrine extends BaseArt {
     this.sphereGeo = new THREE.SphereGeometry(0.5, 48, 32);
     this.tex = { cloth: clothBump(), paper: paperBump(), brushed: brushedRough() };
 
-    // Brand material kits + room moods.
+    // Brand material kits + room moods (fill = secondary light intensity/colour).
     this.kits = {
       iqos: {
         cube: new THREE.MeshStandardMaterial({ color: 0xc9d2da, metalness: 1, roughness: 0.42, roughnessMap: this.tex.brushed, envMapIntensity: 1.2 }),
         sphere: new THREE.MeshPhysicalMaterial({ color: 0x46606e, metalness: 0, roughness: 0.95, bumpMap: this.tex.cloth, bumpScale: 0.6, sheen: 1, sheenRoughness: 0.6, sheenColor: new THREE.Color(0x9fc4d4), envMapIntensity: 0.45 }),
         bg: 0x141a22, floor: 0x161c25, wall: 0x121720, fog: 0.075,
-        key: 2.6, hemi: 0.5, logo: 0xeaf7ff,
+        key: 2.6, hemi: 0.5, fill: 0.35, fillColor: 0xbfd4ff, rim: 0.45, logo: 0xeaf7ff,
       },
       zyn: {
-        cube: new THREE.MeshPhysicalMaterial({ color: 0xf4f6f7, metalness: 0, roughness: 0.3, clearcoat: 0.7, clearcoatRoughness: 0.25, envMapIntensity: 0.9 }),
-        sphere: new THREE.MeshStandardMaterial({ color: 0xece0c8, metalness: 0, roughness: 0.93, bumpMap: this.tex.paper, bumpScale: 0.35, envMapIntensity: 0.5 }),
-        bg: 0xb9c0c6, floor: 0xc6ccd1, wall: 0xb3bac1, fog: 0.06,
-        key: 3.0, hemi: 0.85, logo: 0x00a9e0,
+        // dark navy room so the pale objects pop; cubes get a clear ZYN-blue cast
+        cube: new THREE.MeshPhysicalMaterial({ color: 0x9fd4ec, metalness: 0, roughness: 0.28, clearcoat: 0.8, clearcoatRoughness: 0.2, envMapIntensity: 1.0 }),
+        sphere: new THREE.MeshStandardMaterial({ color: 0xefe3c8, metalness: 0, roughness: 0.93, bumpMap: this.tex.paper, bumpScale: 0.35, envMapIntensity: 0.55 }),
+        bg: 0x0c1d2d, floor: 0x112638, wall: 0x0a1926, fog: 0.07,
+        key: 3.0, hemi: 0.7, fill: 0.5, fillColor: 0x9fd8ff, rim: 0.4, logo: 0x00a9e0,
       },
       veev: {
-        cube: new THREE.MeshStandardMaterial({ color: 0x33373d, metalness: 1, roughness: 0.55, roughnessMap: this.tex.brushed, envMapIntensity: 1.1 }),
-        sphere: new THREE.MeshPhysicalMaterial({ color: 0x0c0c10, metalness: 0, roughness: 0.08, transparent: true, opacity: 0.55, clearcoat: 1, clearcoatRoughness: 0.08, ior: 1.45, envMapIntensity: 1.4 }),
-        bg: 0x0a0b10, floor: 0x0d0e14, wall: 0x080910, fog: 0.085,
-        key: 2.2, hemi: 0.3, logo: 0xb89fef,
+        cube: new THREE.MeshStandardMaterial({ color: 0x4d535c, metalness: 1, roughness: 0.4, roughnessMap: this.tex.brushed, envMapIntensity: 1.7 }),
+        sphere: new THREE.MeshPhysicalMaterial({ color: 0x101014, metalness: 0, roughness: 0.08, transparent: true, opacity: 0.6, clearcoat: 1, clearcoatRoughness: 0.08, ior: 1.45, envMapIntensity: 1.8 }),
+        bg: 0x101218, floor: 0x161823, wall: 0x0e1018, fog: 0.07,
+        // brighter dark room: strong key + lilac fill + white-blue rim as extra sources
+        key: 3.4, hemi: 0.75, fill: 1.0, fillColor: 0xb89fef, rim: 1.3, logo: 0xb89fef,
       },
     };
 
@@ -247,6 +253,39 @@ export class Vitrine extends BaseArt {
 
   _kitId(brandId) { return this.kits[brandId] ? brandId : 'iqos'; }
 
+  // CMS-uploaded textures become material variants (one clone per texture);
+  // objects pick a variant by their index, so multiple textures distribute.
+  _buildVariants(kit) {
+    this._disposeVariants();
+    const make = (baseMat, list) => (list || []).slice(0, 8).map((t) => {
+      const tex = new THREE.TextureLoader().load(t.src);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      const m = baseMat.clone();
+      m.map = tex;
+      m.color.set(0xffffff); // let the uploaded texture carry the colour
+      m.needsUpdate = true;
+      return m;
+    });
+    this._cubeVar = make(kit.cube, this.brandData?.textures?.cubes);
+    this._sphereVar = make(kit.sphere, this.brandData?.textures?.spheres);
+  }
+
+  _disposeVariants() {
+    for (const m of [...(this._cubeVar || []), ...(this._sphereVar || [])]) {
+      if (m.map) m.map.dispose();
+      m.dispose();
+    }
+    this._cubeVar = [];
+    this._sphereVar = [];
+  }
+
+  _materialFor(kind, idx) {
+    const kit = this.kits[this._kitId(this.brandId)];
+    const variants = kind === 'cube' ? this._cubeVar : this._sphereVar;
+    return variants && variants.length ? variants[idx % variants.length] : (kind === 'cube' ? kit.cube : kit.sphere);
+  }
+
   _applyKit(brandId) {
     const id = this._kitId(brandId);
     const kit = this.kits[id];
@@ -256,8 +295,12 @@ export class Vitrine extends BaseArt {
     this.wallMat.color.set(kit.wall);
     this.key.intensity = kit.key;
     this.hemi.intensity = kit.hemi;
+    this.fill.intensity = kit.fill;
+    this.fill.color.set(kit.fillColor);
+    this.rim.intensity = kit.rim;
+    this._buildVariants(kit);
     for (const o of this.objects) {
-      o.mesh.material = o.kind === 'cube' ? kit.cube : kit.sphere;
+      o.mesh.material = this._materialFor(o.kind, o.idx);
     }
     // Brand sign texture + glow colour + plane aspect.
     if (!this._signTextures[id]) {
@@ -275,14 +318,11 @@ export class Vitrine extends BaseArt {
   }
 
   _spawn(kind, initial) {
-    const kit = this.kits[this._kitId(this.brandId)];
-    const mesh = new THREE.Mesh(
-      kind === 'cube' ? this.cubeGeo : this.sphereGeo,
-      kind === 'cube' ? kit.cube : kit.sphere,
-    );
+    const idx = this.objects.length;
+    const mesh = new THREE.Mesh(kind === 'cube' ? this.cubeGeo : this.sphereGeo, this._materialFor(kind, idx));
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    const o = { mesh, kind, home: new THREE.Vector3(), base: 1, age: 0, vz: 0, vx: 0, rot: new THREE.Vector3(), spin: new THREE.Vector3() };
+    const o = { mesh, kind, idx, home: new THREE.Vector3(), base: 1, kR: kind === 'cube' ? 0.64 : 0.5, curR: 0.3, age: 0, vz: 0, vx: 0, rot: new THREE.Vector3(), spin: new THREE.Vector3() };
     this._reseed(o, initial);
     this.scene.add(mesh);
     return o;
@@ -290,14 +330,25 @@ export class Vitrine extends BaseArt {
 
   // Place an object: newborns appear deep in the room; the initial population
   // is spread through the whole depth so the window opens already alive.
+  // Retries a few spots so solid objects don't spawn inside each other.
   _reseed(o, initial = false) {
     const big = o.kind === 'cube';
     o.base = (big ? 0.65 + Math.random() * 0.75 : 0.16 + Math.random() * 0.26) * this.objScale;
-    o.home.set(
-      THREE.MathUtils.lerp(ROOM.left, ROOM.right, Math.random()),
-      THREE.MathUtils.lerp(ROOM.bottom, ROOM.top, Math.random()),
-      initial ? THREE.MathUtils.lerp(ROOM.bornZ, ROOM.exitZ - 0.8, Math.random()) : ROOM.bornZ + Math.random() * 0.8,
-    );
+    o.curR = o.base * o.kR;
+    for (let tries = 0; tries < 9; tries++) {
+      o.home.set(
+        THREE.MathUtils.lerp(ROOM.left, ROOM.right, Math.random()),
+        THREE.MathUtils.lerp(ROOM.bottom, ROOM.top, Math.random()),
+        initial ? THREE.MathUtils.lerp(ROOM.bornZ, ROOM.exitZ - 0.8, Math.random()) : ROOM.bornZ + Math.random() * 0.8,
+      );
+      let clear = true;
+      for (const other of this.objects) {
+        if (other === o) continue;
+        const rr = o.curR + other.curR;
+        if (o.home.distanceToSquared(other.home) < rr * rr) { clear = false; break; }
+      }
+      if (clear) break;
+    }
     o.age = initial ? 2 : 0; // newborns scale in; initial population is grown
     o.vz = 0.10 + Math.random() * 0.16;
     o.vx = (Math.random() - 0.5) * 0.05;
@@ -312,9 +363,12 @@ export class Vitrine extends BaseArt {
     for (let i = 0; i < this.spheres; i++) this.objects.push(this._spawn('sphere', true));
   }
 
-  setBrand(brandId) {
-    if (brandId === this.brandId) return;
+  /** Brand identity = material kit (+ any CMS-uploaded cube/sphere textures). */
+  setBrand(brandId, brand) {
+    const sameBrand = brandId === this.brandId;
     this.brandId = brandId;
+    if (brand) this.brandData = brand;
+    if (sameBrand && !brand) return; // nothing new to apply
     this._applyKit(brandId);
   }
 
@@ -376,13 +430,49 @@ export class Vitrine extends BaseArt {
     this.camera.lookAt(0, 0, -2.2);
 
     const reveal = this.reveal;
+    // 1) Drift + life cycle bookkeeping.
     for (const o of this.objects) {
       o.age += dt;
-      // drift toward the window; gone once it leaves, reborn in the depth
       o.home.z += o.vz * this.driftSpeed * dt;
       o.home.x += o.vx * this.driftSpeed * dt;
-      if (o.home.z > ROOM.exitZ || o.home.x < ROOM.left - 1 || o.home.x > ROOM.right + 1) this._reseed(o);
+      // Near the window things slide off-axis (as if passing the glass), so
+      // they exit via the sides instead of flying into the viewer's eye.
+      const dist = this.camera.position.z - o.home.z;
+      if (dist < 2.6) {
+        const away = (2.6 - dist) * dt * this.driftSpeed;
+        o.home.x += Math.sign(o.home.x || 0.3) * away * 0.55;
+        o.home.y += Math.sign(o.home.y || 0.2) * away * 0.3;
+      }
       const grow = THREE.MathUtils.smoothstep(o.age, 0, 1.4); // born small in the depth
+      o.curR = o.base * o.kR * Math.max(grow, 0.05);
+    }
+
+    // 2) SOLID BODIES: pairwise sphere-bound separation (soft relaxation) so
+    //    cubes and spheres never pass through each other.
+    const relax = Math.min(1, dt * 6);
+    for (let a = 0; a < this.objects.length; a++) {
+      const A = this.objects[a];
+      for (let b = a + 1; b < this.objects.length; b++) {
+        const B = this.objects[b];
+        const dx = B.home.x - A.home.x;
+        const dy = B.home.y - A.home.y;
+        const dz = B.home.z - A.home.z;
+        const rr = (A.curR + B.curR) * 1.02;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 >= rr * rr) continue;
+        const d = Math.max(Math.sqrt(d2), 1e-3);
+        const push = (rr - d) * 0.5 * relax;
+        const nx = dx / d, ny = dy / d, nz = dz / d;
+        A.home.x -= nx * push; A.home.y -= ny * push; A.home.z -= nz * push;
+        B.home.x += nx * push; B.home.y += ny * push; B.home.z += nz * push;
+      }
+    }
+
+    // 3) Pose, touch parting, and off-screen recycling.
+    const camX = this.camera.position.x, camY = this.camera.position.y, camZ = this.camera.position.z;
+    const tanH = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    for (const o of this.objects) {
+      const grow = THREE.MathUtils.smoothstep(o.age, 0, 1.4);
       const wob = 1 + 0.012 * Math.sin(this.time * 1.3 + o.rot.x * 10);
       o.mesh.scale.setScalar(o.base * grow * wob);
       o.rot.x += o.spin.x * dt; o.rot.y += o.spin.y * dt; o.rot.z += o.spin.z * dt;
@@ -404,6 +494,19 @@ export class Vitrine extends BaseArt {
       o.mesh.position.x += (px - o.mesh.position.x) * ease;
       o.mesh.position.y += (py - o.mesh.position.y) * ease;
       o.mesh.position.z = o.home.z;
+
+      // Recycle ONLY once fully outside the view (its whole bounding sphere has
+      // left the frustum, with margin) — nothing pops mid-frame any more.
+      const r = o.curR * 1.3;
+      const dist = camZ - o.mesh.position.z;
+      if (dist < -r) { this._reseed(o); continue; }       // fully past the window
+      if (dist > 0.3) {
+        const hh = tanH * dist, hw = hh * this.camera.aspect;
+        if (o.mesh.position.x - camX > hw + r || camX - o.mesh.position.x > hw + r ||
+            o.mesh.position.y - camY > hh + r || camY - o.mesh.position.y > hh + r) {
+          this._reseed(o);
+        }
+      }
     }
 
     // The brand sign: revealed by touch, or flickering briefly on a sale.
@@ -422,6 +525,7 @@ export class Vitrine extends BaseArt {
   destroy() {
     this.renderer.toneMapping = this._prevToneMapping;
     for (const o of this.objects) this.scene.remove(o.mesh);
+    this._disposeVariants();
     this.cubeGeo.dispose();
     this.sphereGeo.dispose();
     Object.values(this.tex).forEach((t) => t.dispose());

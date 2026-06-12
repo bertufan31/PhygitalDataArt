@@ -111,7 +111,8 @@ export class Stage {
     // Keep an active brand theme — unless the art owns its look (e.g. the
     // realistic PBR piece, whose brand identity lives in its materials).
     if (this._brandColors && !ArtClass.ownLook) this.grade.setColors(this._brandColors);
-    this.art.setBrand(this.state.activeBrandId); // brand-aware arts morph to it
+    // brand-aware arts morph to it / re-dress (full brand record incl. textures)
+    this.art.setBrand(this.state.activeBrandId, getBrand(this.state.brands, this.state.activeBrandId));
     if (ArtClass.noPrism && this.state.targetId === 'prism') this.setTarget('flat');
     if (this.target) this.target.setTexture(this.grade.texture);
   }
@@ -130,7 +131,7 @@ export class Stage {
     } else {
       this.grade.setColors(this._brandColors);
     }
-    if (this.art) this.art.setBrand(brandId);
+    if (this.art) this.art.setBrand(brandId, getBrand(this.state.brands, brandId));
   }
 
   setTarget(targetId) {

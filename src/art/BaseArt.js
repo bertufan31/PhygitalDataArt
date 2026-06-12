@@ -37,8 +37,9 @@ export class BaseArt {
   /** React to a data event ({ type, data, ts }) from the simulator or a DJ pad. */
   onEvent(_event) {}
 
-  /** Optional: the active brand changed (brand id). Brand-aware arts may morph. */
-  setBrand(_brandId) {}
+  /** Optional: the active brand changed. Brand-aware arts may morph/re-dress.
+   * @param {string} _brandId  @param {object} [_brand] full CMS record (palette, textures, …) */
+  setBrand(_brandId, _brand) {}
 
   /** Optional: pointer/touch moved. x,y in NDC (-1..1); active toggles interaction. */
   setPointer(_x, _y, _active) {}

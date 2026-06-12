@@ -339,6 +339,48 @@ body {
 .asset-link:hover {
   text-decoration: underline;
 }
+.tex-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tex-thumb {
+  position: relative;
+  width: 72px;
+  height: 54px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: visible;
+}
+.tex-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 7px;
+  display: block;
+}
+.tex-del {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--fg);
+  background: #2a2e3c;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  cursor: pointer;
+}
+.tex-del:hover {
+  background: #c0392b;
+}
+.tex-input {
+  font-size: 12px;
+  color: var(--muted);
+}
 .brand-text,
 .brand-input {
   width: 100%;

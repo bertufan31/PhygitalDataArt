@@ -79,6 +79,10 @@ function init() {
         stage.setActiveBrand(state.activeBrandId);
         syncBrandCycle(); // manual pick (or auto-advance) restarts the timer
         break;
+      case CommandTypes.SET_BRAND:
+        // CMS edited a brand (palette, textures, …) — re-dress if it's live.
+        if (cmd.data.brandId === state.activeBrandId) stage.setActiveBrand(state.activeBrandId);
+        break;
       case CommandTypes.SET_BRAND_CYCLE:
         syncBrandCycle();
         break;
