@@ -17,7 +17,7 @@
 export const BRAND_IDS = ['iqos', 'zyn', 'veev'];
 
 // Bump when the SEED changes so saved (stale) brand data is refreshed on load.
-export const BRANDS_VERSION = 2;
+export const BRANDS_VERSION = 3;
 
 // Resolve a /public/brands asset against the Vite base (works under the
 // GitHub-Pages project subpath too).
@@ -52,10 +52,10 @@ const SEED = {
   veev: {
     id: 'veev',
     label: 'VEEV',
-    // Brand baseline: V mark in Light Purple on a Lilac ground, shaded with
-    // Deep Purple; Pure White as the supporting tone. amount 1.0 → exact brand
-    // colour on the V (no white sparkle bleed).
-    palette: { primary: '#332072', secondary: '#FFFFFF', background: '#B89FEF', shadow: '#221551', accents: ['#221551', '#FFFFFF'], amount: 1.0 },
+    // Brand baseline: V mark glowing in Lilac (shaded with Deep Purple) on a
+    // Light Purple ground; Pure White as the supporting tone. amount 1.0 →
+    // exact brand colour on the V (no white sparkle bleed).
+    palette: { primary: '#B89FEF', secondary: '#FFFFFF', background: '#332072', shadow: '#221551', accents: ['#221551', '#FFFFFF'], amount: 1.0 },
     logos: [
       { id: 'wordmark', label: 'VEEV wordmark', kind: 'vector', src: asset('veev-global.pdf') },
       { id: 'v-shape', label: 'VEEV “V” mark', kind: 'image', src: asset('veev-vshape.pdf') },
