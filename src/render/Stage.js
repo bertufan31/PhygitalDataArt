@@ -108,8 +108,11 @@ export class Stage {
     this.state.artId = ArtClass.id;
     this.grade.setSource(this.art.texture);
     this.grade.setColors(params);
-    if (this._brandColors) this.grade.setColors(this._brandColors); // keep an active brand theme
+    // Keep an active brand theme — unless the art owns its look (e.g. the
+    // realistic PBR piece, whose brand identity lives in its materials).
+    if (this._brandColors && !ArtClass.ownLook) this.grade.setColors(this._brandColors);
     this.art.setBrand(this.state.activeBrandId); // brand-aware arts morph to it
+    if (ArtClass.noPrism && this.state.targetId === 'prism') this.setTarget('flat');
     if (this.target) this.target.setTexture(this.grade.texture);
   }
 
@@ -120,11 +123,18 @@ export class Stage {
   setActiveBrand(brandId) {
     this.state.activeBrandId = brandId;
     this._brandColors = brandColorParams(getBrand(this.state.brands, brandId));
-    this.grade.setColors(this._brandColors);
+    const ArtClass = getArt(this.state.artId);
+    if (ArtClass?.ownLook) {
+      // The art owns its look (PBR materials carry the brand) — keep its own palette.
+      this.grade.setColors(mergedArtParams(this.state, this.state.artId, ArtClass));
+    } else {
+      this.grade.setColors(this._brandColors);
+    }
     if (this.art) this.art.setBrand(brandId);
   }
 
   setTarget(targetId) {
+    if (targetId === 'prism' && getArt(this.state.artId)?.noPrism) targetId = 'flat'; // art opts out of prisms
     if (this.target) this.target.dispose(this.scene);
     const aspect = this._frameAspect();
     if (targetId === 'prism') {

@@ -314,6 +314,13 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     setActive(viewBtns, state.viewId);
     setActive(targetBtns, state.targetId);
     setActive(frameBtns, state.frameStyle);
+    // Some arts opt out of the LED-prism target (e.g. the realistic PBR piece).
+    const prismBtn = targetBtns.get('prism');
+    if (prismBtn) {
+      const blocked = !!getArt(state.artId)?.noPrism;
+      prismBtn.disabled = blocked;
+      prismBtn.title = blocked ? 'Not available for this art option' : '';
+    }
     simBtn.textContent = state.sim.running ? '■ Pause data feed' : '▶ Resume data feed';
     simBtn.classList.toggle('active', state.sim.running);
     brandCycleBtn.textContent = state.brandCycle.running ? '■ Pause brand cycle' : '▶ Resume brand cycle';

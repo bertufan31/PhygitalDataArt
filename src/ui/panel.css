@@ -115,6 +115,10 @@ body {
   color: var(--accent-ink);
   font-weight: 600;
 }
+.opt:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
 .opt--wide {
   width: 100%;
 }

@@ -21,6 +21,7 @@ const COLOR_DEFAULTS = {
   'key-pattern': ['#0b2a30', '#19d3d4', '#06121a'],
   'slipstream': ['#0a1c3a', '#8fe3ff', '#05080f'],
   'store-pulse': ['#0a1626', '#7fd8ff', '#04070c'],
+  'vitrine': ['#0a0e14', '#cfd6dd', '#0a0e14'],
 };
 
 // Default recolour amount per art (how strongly the duotone applies).
@@ -30,6 +31,7 @@ const AMOUNT_DEFAULTS = {
   'key-pattern': 0.5,
   'slipstream': 0.8, // wind streaks are near-monochrome → duotone carries the brand colour
   'store-pulse': 0, // the heatmap ramp (blue→red) IS the data — keep true colours
+  'vitrine': 0, // physically-lit materials — never duotone a realistic scene
 };
 
 export function colorDefaults(artId) {

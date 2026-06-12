@@ -160,6 +160,7 @@ const fragmentShader = /* glsl */ `
 export class StorePulse extends BaseArt {
   static id = 'store-pulse';
   static label = 'Store Pulse';
+  static archived = true; // lower-priority — tucked under the Archive disclosure
   static params = [
     { key: 'count', type: 'range', label: 'Particles', min: 20000, max: 150000, step: 10000, default: 60000 },
     { key: 'size', type: 'range', label: 'Particle size', min: 0.3, max: 3, step: 0.1, default: 1 },
