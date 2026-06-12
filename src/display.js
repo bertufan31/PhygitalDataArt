@@ -14,6 +14,7 @@ import { CommandTypes, makeCommand } from './core/events.js';
 import { Stage } from './render/Stage.js';
 import { Simulator } from './core/simulator.js';
 import { initHamburger } from './ui/hamburger.js';
+import { BRAND_IDS } from './core/brands.js';
 
 const canvas = document.getElementById('stage');
 const state = loadState();
@@ -32,6 +33,21 @@ function init() {
     bus.send(event);
   });
   if (state.sim.running) sim.start(state.sim.rate);
+
+  // Auto brand rotation (pausable like the data feed). The display owns the
+  // timer; each advance goes through dispatch so every window stays in sync.
+  // (Re)arming on every manual brand pick gives it a full period before moving on.
+  let brandTimer = null;
+  function syncBrandCycle() {
+    clearInterval(brandTimer);
+    brandTimer = null;
+    if (!state.brandCycle?.running) return;
+    const period = Math.max(3, state.brandCycle.period ?? 12) * 1000;
+    brandTimer = setInterval(() => {
+      const next = BRAND_IDS[(BRAND_IDS.indexOf(state.activeBrandId) + 1) % BRAND_IDS.length];
+      dispatch(makeCommand(CommandTypes.SET_ACTIVE_BRAND, { brandId: next }));
+    }, period);
+  }
 
   let hamburger;
 
@@ -61,6 +77,10 @@ function init() {
         break;
       case CommandTypes.SET_ACTIVE_BRAND:
         stage.setActiveBrand(state.activeBrandId);
+        syncBrandCycle(); // manual pick (or auto-advance) restarts the timer
+        break;
+      case CommandTypes.SET_BRAND_CYCLE:
+        syncBrandCycle();
         break;
       case CommandTypes.SET_SIM:
         sim.setRate(state.sim.rate);
@@ -91,4 +111,5 @@ function init() {
     bus.send(cmd);
   }
   hamburger = initHamburger({ state, dispatch });
+  syncBrandCycle();
 }

@@ -1,24 +1,24 @@
 // ---------------------------------------------------------------------------
 // Art option: "Key Particles".
 //
-// A rotating 3D point-cloud in the emblem shape, evolved into a motion-forward,
-// brand-aware piece. Three layered behaviours (all preserve the original spin):
-//   • MOVEMENT  — a bounded curl/wind flow + gentle directional current gives a
-//                 premium sense of drift (the `Drift` control).
-//   • BRAND MORPH — when a brand with a silhouette is active (ZYN / VEEV), the
-//                 particles flow from the emblem into that brand form; IQOS (no
-//                 silhouette) holds the emblem. Palette/background follow via the
-//                 Stage's brand theming. Morph eases in/out smoothly.
-//   • TOUCH     — particles are pulled toward the pointer/finger (the `Pointer`
-//                 reach control), so the piece reacts to people.
-// Data reactions still tint particles toward the event colour and spawn on the
-// active shape.
+// A rotating 3D point-cloud in the emblem shape, evolved into a brand-aware
+// piece. Shapes are always CRISP — the silhouette is never deformed at rest;
+// depth (3D) comes from the emblem's distance field or, for brand forms, a
+// clean extruded slab. Behaviours:
+//   • BRAND MORPH — particles flow between forms (emblem ↔ ZYN ↔ VEEV) with a
+//                 smooth cross-morph from wherever they currently are; the spin
+//                 settles facing front so logos read. Brands can auto-cycle
+//                 (display-driven, pausable like the data feed).
+//   • MOVEMENT  — a subtle per-particle depth breathing (Drift) gives life
+//                 without touching the 2D outline.
+//   • TOUCH    — a gentle anti-gravity push: particles ease away from the
+//                 pointer/finger and ease back (Pointer control).
+// Data reactions still tint particles toward the event colour.
 // ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
 import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
-import { NOISE_GLSL } from '../shaderLib.js';
 import { EffectField, KIND_ENERGY, Eased } from '../effects.js';
 import { samplePoints, sdfAt } from '../../core/shape.js';
 import { hasBrandSilhouette, sampleBrandPoints } from '../../core/brandShapes.js';
@@ -31,31 +31,28 @@ const vertexShader = /* glsl */ `
   #define FX_MAX ${FX_MAX}
   attribute float aPhase;
   attribute float aSize;
-  attribute vec3 aTarget;                 // brand-morph destination for this point
-  uniform float uTime, uEnergy, uTwinkle, uPixel, uSizeScale, uMorph, uDrift;
-  uniform vec4 uPointer;                  // xy = pos (art space), z = active, w = reach
+  attribute vec3 aTarget;                 // morph destination (next form) for this point
+  uniform float uTime, uEnergy, uTwinkle, uPixel, uSizeScale, uMorph, uDrift, uLock;
+  uniform vec4 uPointer;                  // xy = pos (art space), z = eased presence, w = reach
   uniform vec4 uFxPos[FX_MAX];
   uniform vec3 uFxColor[FX_MAX];
   uniform int uFxCount;
   varying float vAlpha;
   varying vec3 vTint;
   varying float vMix;
-  ${NOISE_GLSL}
   void main(){
-    vec3 pos = mix(position, aTarget, uMorph);       // emblem → brand form
+    vec3 pos = mix(position, aTarget, uMorph);       // previous form → next form
 
-    // MOVEMENT: bounded curl flow + a gentle forward current. Eased down as the
-    // shape locks into a brand form so the logo stays legible.
-    float drift = uDrift * mix(1.0, 0.32, uMorph);
-    vec2 flow = curl(pos.xy * 1.3 + vec2(uTime * 0.18, uTime * 0.05));
-    pos.xy += flow * drift * 0.12;
-    pos.x  += sin(uTime * 0.4 + pos.y * 2.0) * drift * 0.03;
+    // MOVEMENT: per-particle depth breathing only — the 2D silhouette is never
+    // deformed, so the emblem/logos stay crisp. Calmer once locked on a brand.
+    pos.z += sin(uTime * 0.5 + aPhase * 6.2831) * uDrift * 0.07 * (1.0 - 0.5 * uLock);
 
-    // TOUCH: gravitational pull toward the pointer/finger.
-    if (uPointer.z > 0.5) {
-      vec2 d = uPointer.xy - pos.xy;
-      float pull = exp(-dot(d, d) * 3.0);
-      pos.xy += normalize(d + 1e-5) * pull * uPointer.w * 0.5;
+    // TOUCH: gentle anti-gravity — particles ease away from the pointer and
+    // ease back (uPointer.z is temporally smoothed on the CPU).
+    if (uPointer.z > 0.001) {
+      vec2 d = pos.xy - uPointer.xy;
+      float push = exp(-dot(d, d) * 2.0);
+      pos.xy += normalize(d + 1e-4) * push * uPointer.z * uPointer.w * 0.22;
     }
 
     vec3 tintCol = vec3(0.0);
@@ -109,7 +106,7 @@ export class KeyParticles extends BaseArt {
     { key: 'spin', type: 'range', label: 'Spin', min: 0, max: 1.0, step: 0.05, default: 0.3 },
     { key: 'depth', type: 'range', label: 'Depth', min: 0.0, max: 0.8, step: 0.05, default: 0.4 },
     { key: 'drift', type: 'range', label: 'Drift', min: 0, max: 1, step: 0.05, default: 0.35 },
-    { key: 'pointer', type: 'range', label: 'Pointer pull', min: 0, max: 1.5, step: 0.05, default: 0.7 },
+    { key: 'pointer', type: 'range', label: 'Pointer push', min: 0, max: 1.5, step: 0.05, default: 0.7 },
   ];
 
   init(ctx) {
@@ -119,9 +116,12 @@ export class KeyParticles extends BaseArt {
     this.spin = 0.3;
     this.count = 50000;
     this.depth = 0.4;
-    this.brandId = null; // active morph target (null/iqos = emblem)
-    this.morph = 0; // current eased morph amount
-    this.morphTarget = 0;
+    this.brandId = null; // active brand (null/iqos = emblem)
+    this.branded = false; // current form is a brand silhouette
+    this.morph = 1; // eased cross-morph: position(prev form) → aTarget(next form)
+    this.morphTarget = 1;
+    this._lock = 0; // eased "locked on a brand" amount (settles spin/facing)
+    this._pX = 0; this._pY = 0; this._pActive = false; this._pEase = 0; // pointer smoothing
     this.energy = new Eased(0.5, { max: 3, decay: 0.6, rise: 1.8 });
     // Spawn effects ON the active shape (it's thin; random points would miss it).
     this._pool = samplePoints(400);
@@ -137,7 +137,8 @@ export class KeyParticles extends BaseArt {
       uTwinkle: { value: 1.6 },
       uPixel: { value: this.size.height / 600 },
       uSizeScale: { value: 1 },
-      uMorph: { value: 0 },
+      uMorph: { value: 1 },
+      uLock: { value: 0 },
       uDrift: { value: 0.35 },
       uPointer: { value: new THREE.Vector4(0, 0, 0, 0.7) },
       uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
@@ -186,52 +187,69 @@ export class KeyParticles extends BaseArt {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
     geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
-    geo.setAttribute('aTarget', new THREE.BufferAttribute(new Float32Array(n * 3), 3));
+    geo.setAttribute('aTarget', new THREE.BufferAttribute(positions.slice(), 3));
     this.geometry = geo;
-    this._writeTarget(); // fill aTarget for the current brand (or the emblem)
+    this._emblem = positions.slice(); // emblem base kept for re-targeting back
     this.points = new THREE.Points(geo, this.material);
     this.points.frustumCulled = false;
     this.scene.add(this.points);
+    // If a brand is active when (re)building, jump straight to its form.
+    if (this.branded) {
+      this._writeTarget();
+      this.morph = this.morphTarget = 1;
+      this.uniforms.uMorph.value = 1;
+    }
   }
 
-  // Fill the morph-destination attribute: a brand silhouette if the active brand
-  // has one, otherwise the emblem itself (so morph is a no-op for IQOS).
+  // Fill the morph-destination attribute with the NEXT form: the brand
+  // silhouette (as a clean extruded slab — 3D, never wavy) or the emblem.
   _writeTarget() {
     const n = this.count;
     const tgt = this.geometry.attributes.aTarget.array;
     const brandPts = hasBrandSilhouette(this.brandId) ? sampleBrandPoints(this.brandId, n) : null;
-    const pos = this.geometry.attributes.position.array;
-    for (let i = 0; i < n; i++) {
-      if (brandPts) {
+    if (brandPts) {
+      const slab = Math.max(this.depth, 0.05) * 0.45; // crisp extrusion depth
+      for (let i = 0; i < n; i++) {
         tgt[i * 3] = brandPts[i * 2] * SHAPE_SCALE;
         tgt[i * 3 + 1] = brandPts[i * 2 + 1] * SHAPE_SCALE;
-        tgt[i * 3 + 2] = (Math.random() - 0.5) * 0.05; // logos read flat
-      } else {
-        tgt[i * 3] = pos[i * 3];
-        tgt[i * 3 + 1] = pos[i * 3 + 1];
-        tgt[i * 3 + 2] = pos[i * 3 + 2];
+        tgt[i * 3 + 2] = (Math.random() - 0.5) * slab;
       }
+    } else {
+      tgt.set(this._emblem);
     }
     this.geometry.attributes.aTarget.needsUpdate = true;
   }
 
-  /** Brand morphing: switch the morph target + ease the amount in/out. */
+  /**
+   * Brand morphing with smooth brand→brand transitions: the CURRENT blend is
+   * baked into `position` as the new origin, the next form goes into `aTarget`,
+   * and the morph eases 0 → 1 from wherever the particles are now.
+   */
   setBrand(brandId) {
     if (brandId === this.brandId) return;
     this.brandId = brandId;
-    if (this.geometry) this._writeTarget();
-    this.morphTarget = hasBrandSilhouette(brandId) ? 1 : 0;
+    this.branded = hasBrandSilhouette(brandId);
+    if (!this.geometry) return;
+    const pos = this.geometry.attributes.position;
+    const tgt = this.geometry.attributes.aTarget;
+    if (this.morph > 0) {
+      const p = pos.array, t = tgt.array, m = this.morph;
+      for (let i = 0; i < p.length; i++) p[i] += (t[i] - p[i]) * m; // bake current blend
+      pos.needsUpdate = true;
+    }
+    this._writeTarget();
+    this.morph = 0;
+    this.morphTarget = 1;
   }
 
-  /** Touch / pointer: position in normalized device coords (-1..1); active toggles it. */
+  /** Touch / pointer: position in NDC (-1..1); eased on update for smoothness. */
   setPointer(x, y, active) {
     // Map NDC to the art's world plane at z=0 (camera at z=3.2, fov 45°).
     const halfH = Math.tan((this.camera.fov * Math.PI) / 360) * this.camera.position.z;
     const halfW = halfH * this.camera.aspect;
-    const p = this.uniforms.uPointer.value;
-    p.x = x * halfW;
-    p.y = y * halfH;
-    p.z = active ? 1 : 0;
+    this._pX = x * halfW;
+    this._pY = y * halfH;
+    this._pActive = active;
   }
 
   setParams(p) {
@@ -262,13 +280,21 @@ export class KeyParticles extends BaseArt {
     this.time += dt;
     this.fx.update(dt);
     this.morph += (this.morphTarget - this.morph) * Math.min(1, dt * 2.2); // smooth ease
-    // Spin while it's the emblem; freeze + settle facing front once it locks
-    // into a brand form, so the logo reads cleanly.
-    this.points.rotation.y += dt * this.spin * (1 - this.morph);
+    this._lock += ((this.branded ? 1 : 0) - this._lock) * Math.min(1, dt * 2.0);
+    // Spin while it's the emblem; settle facing front as it locks on a brand
+    // form, so the logo reads cleanly.
+    this.points.rotation.y += dt * this.spin * (1 - this._lock);
     this.points.rotation.y %= Math.PI * 2;
-    if (this.morph > 0.01) {
-      this.points.rotation.y = THREE.MathUtils.lerp(this.points.rotation.y, 0, Math.min(1, dt * 2.5 * this.morph));
+    if (this._lock > 0.01) {
+      this.points.rotation.y = THREE.MathUtils.lerp(this.points.rotation.y, 0, Math.min(1, dt * 2.5 * this._lock));
     }
+    // Pointer smoothing: eased presence + eased position (no popping).
+    const p = this.uniforms.uPointer.value;
+    this._pEase += ((this._pActive ? 1 : 0) - this._pEase) * Math.min(1, dt * 5);
+    p.x += (this._pX - p.x) * Math.min(1, dt * 10);
+    p.y += (this._pY - p.y) * Math.min(1, dt * 10);
+    p.z = this._pEase;
+    this.uniforms.uLock.value = this._lock;
     this.uniforms.uTime.value = this.time;
     this.uniforms.uMorph.value = this.morph;
     this.uniforms.uEnergy.value = this.energy.update(dt);

@@ -108,6 +108,11 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     brandBtns.set(b.id, btn);
     brandRow.append(btn);
   }
+  const brandCycleBtn = el('button', {
+    class: 'opt opt--wide',
+    onclick: () => dispatch(makeCommand(CommandTypes.SET_BRAND_CYCLE, { running: !state.brandCycle.running })),
+  });
+  const brandBody = el('div', { class: 'stack' }, [brandRow, brandCycleBtn]);
 
   // -- Display target ----------------------------------------------------
   const targetRow = el('div', { class: 'btn-grid' });
@@ -275,7 +280,7 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     ]),
     el('div', { class: 'panel-grid' }, [
       section('Art options', artBody),
-      section('Brand', brandRow),
+      section('Brand', brandBody),
       section('Colour', colourBody),
       artSettingsSection,
       section('Mockup view', viewRow),
@@ -302,6 +307,8 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     setActive(frameBtns, state.frameStyle);
     simBtn.textContent = state.sim.running ? '■ Pause data feed' : '▶ Resume data feed';
     simBtn.classList.toggle('active', state.sim.running);
+    brandCycleBtn.textContent = state.brandCycle.running ? '■ Pause brand cycle' : '▶ Resume brand cycle';
+    brandCycleBtn.classList.toggle('active', state.brandCycle.running);
     rateSlider.value = String(state.sim.rate);
     rateLabel.textContent = `${state.sim.rate.toFixed(2)}×`;
     if (document.activeElement !== fW.input) fW.input.value = String(state.frame.w);

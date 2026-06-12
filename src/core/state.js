@@ -26,6 +26,7 @@ const DEFAULT_STATE = {
   sim: { running: true, rate: 1.0 }, // fake-data engine on/off + speed multiplier
   brands: defaultBrands(), // brand CMS source-of-truth (palette/logos/imagery/rules)
   activeBrandId: 'iqos', // brand currently in focus in the CMS
+  brandCycle: { running: true, period: 12 }, // auto brand rotation (pausable, like sim)
 };
 
 export function defaultState() {
@@ -51,6 +52,7 @@ export function loadState() {
         frame: { ...base.frame, ...saved.frame },
         prism: { ...base.prism, ...saved.prism },
         sim: { ...base.sim, ...saved.sim },
+        brandCycle: { ...base.brandCycle, ...saved.brandCycle },
         artParams: { ...(saved.artParams || {}) },
         brands,
       };
@@ -103,6 +105,9 @@ export function applyCommand(state, cmd) {
       break;
     case CommandTypes.SET_ACTIVE_BRAND:
       state.activeBrandId = cmd.data.brandId;
+      break;
+    case CommandTypes.SET_BRAND_CYCLE:
+      state.brandCycle = { ...state.brandCycle, ...cmd.data };
       break;
     case CommandTypes.SET_BRAND: {
       const { brandId, patch } = cmd.data;
