@@ -20,9 +20,12 @@
 import * as THREE from 'three';
 import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
+import { EventTypes } from '../../core/events.js';
 import { NOISE_GLSL } from '../shaderLib.js';
+import { Eased } from '../effects.js';
 
 const MASK_W = 128; // background-subtraction grid (small, ~9k px/frame)
+const RIP_MAX = 5;  // concurrent visitor ripples
 
 const vertexShader = /* glsl */ `
   varying vec2 vUv;
@@ -31,8 +34,10 @@ const vertexShader = /* glsl */ `
 const fragmentShader = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
-  uniform float uTime, uAspect, uMaskOn, uIdle;
+  uniform float uTime, uAspect, uMaskOn, uIdle, uPulse, uShimmer;
   uniform sampler2D uMask;
+  uniform vec3 uRip[${RIP_MAX}];   // xy = centre (0..1), z = age (0..1)
+  uniform int uRipCount;
   ${NOISE_GLSL}
   void main(){
     // Idle: a slow drifting noise field lifts a few prisms and lets them settle.
@@ -42,9 +47,22 @@ const fragmentShader = /* glsl */ `
 
     // Presence: the visitor's silhouette (mask) rises the wall in its shape.
     float sil = clamp(texture2D(uMask, vUv).r * 1.25, 0.0, 1.0);
-
     float h = max(idle, sil * uMaskOn);
-    gl_FragColor = vec4(vec3(h), 1.0); // grayscale height → prism rise + ramp
+
+    // VISITOR → ripple: rings of rise travel out across the wall.
+    for (int i = 0; i < ${RIP_MAX}; i++) {
+      if (i >= uRipCount) break;
+      vec2 c = uRip[i].xy * vec2(uAspect, 1.0);
+      float age = uRip[i].z;
+      float ring = exp(-pow((distance(p, c) - age * 1.2) * 6.0, 2.0)) * (1.0 - age);
+      h = max(h, ring * 0.95);
+    }
+    // SALE / FLAVOUR → the whole wall surges up (toward the secondary colour).
+    h = max(h, uPulse * (0.7 + 0.3 * fbm(p * 2.0 + uTime * 0.5)));
+    // PRODUCT → a shimmer jolts scattered prisms.
+    h += uShimmer * smoothstep(0.45, 1.0, snoise(p * 9.0 + uTime * 6.0)) * 0.7;
+
+    gl_FragColor = vec4(vec3(clamp(h, 0.0, 1.0)), 1.0); // height → prism rise + ramp
   }
 `;
 
@@ -86,16 +104,26 @@ export class PresencePrisms extends BaseArt {
     this.workCanvas.width = this.maskW; this.workCanvas.height = this.maskH;
     this.workCtx = this.workCanvas.getContext('2d', { willReadFrequently: true });
     this._bgRef = null;
+    this._prevCur = null; // previous frame, for MOVEMENT detection
     this._smooth = new Float32Array(this.maskW * this.maskH);
     this._blurTmp = new Float32Array(this.maskW * this.maskH);
     this._maskImage = this.maskCtx.createImageData(this.maskW, this.maskH);
+
+    // Live-data reactions.
+    this.pulse = new Eased(0, { max: 1, decay: 1.0, rise: 6 });   // sale/flavour surge
+    this.shimmer = new Eased(0, { max: 1, decay: 1.4, rise: 8 }); // product jolt
+    this.ripples = []; // visitor rings: { x, y, t }
 
     this.uniforms = {
       uTime: { value: 0 },
       uAspect: { value: aspect },
       uMaskOn: { value: 0 },
       uIdle: { value: 0.5 },
+      uPulse: { value: 0 },
+      uShimmer: { value: 0 },
       uMask: { value: this.maskTex },
+      uRip: { value: Array.from({ length: RIP_MAX }, () => new THREE.Vector3()) },
+      uRipCount: { value: 0 },
     };
     this.material = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader, fragmentShader });
     this.scene = new THREE.Scene();
@@ -149,22 +177,27 @@ export class PresencePrisms extends BaseArt {
     if (this.phase !== 'live' || !this._drawVideo()) return;
     this._bgRef = this.workCtx.getImageData(0, 0, this.maskW, this.maskH).data.slice();
     this._smooth.fill(0);
+    this._prevCur = null;
+    this._lastActive = -Infinity; // require fresh MOVEMENT to engage
   }
 
   _updateMask() {
     if (!this._bgRef || !this._drawVideo()) return;
     const cur = this.workCtx.getImageData(0, 0, this.maskW, this.maskH).data;
-    const bg = this._bgRef, sm = this._smooth;
+    const bg = this._bgRef, prev = this._prevCur, sm = this._smooth;
     const W = this.maskW, H = this.maskH, t = this.threshold;
-    let activity = 0;
+    let motion = 0;
     for (let i = 0, p = 0; i < sm.length; i++, p += 4) {
+      // Silhouette SHAPE: difference from the empty-scene reference.
       const diff = (Math.abs(cur[p] - bg[p]) + Math.abs(cur[p + 1] - bg[p + 1]) + Math.abs(cur[p + 2] - bg[p + 2])) / 765;
       let x = (diff - t) / 0.22; x = x < 0 ? 0 : x > 1 ? 1 : x;
       const v = x * x * (3 - 2 * x);
       sm[i] += (v - sm[i]) * 0.2; // temporal smoothing (organic, not jumpy)
-      activity += sm[i];
+      // ENGAGEMENT: frame-to-frame MOVEMENT (a still person fades to idle).
+      if (prev) motion += (Math.abs(cur[p] - prev[p]) + Math.abs(cur[p + 1] - prev[p + 1]) + Math.abs(cur[p + 2] - prev[p + 2])) / 765;
     }
-    if (activity / sm.length > 0.015) this._lastActive = this.time;
+    this._prevCur = cur;
+    if (prev && motion / sm.length > 0.004) this._lastActive = this.time; // someone moved
     const blur = (src, dst) => {
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
         let acc = 0, cnt = 0;
@@ -188,6 +221,25 @@ export class PresencePrisms extends BaseArt {
     if (p.idle != null) this.uniforms.uIdle.value = p.idle;
   }
 
+  // Live data reactions, chosen to read on a rising prism wall:
+  //   visitor → a ripple ring rolls out · sale/flavour → the wall surges up
+  //   (toward the secondary colour) · product → a shimmer jolts the prisms.
+  onEvent(event) {
+    switch (event.type) {
+      case EventTypes.VISITOR_ENTERED:
+        this.ripples.push({ x: 0.15 + Math.random() * 0.7, y: 0.15 + Math.random() * 0.7, t: 0 });
+        if (this.ripples.length > RIP_MAX) this.ripples.shift();
+        break;
+      case EventTypes.SALE_MADE:
+      case EventTypes.FLAVOUR_SOLD:
+        this.pulse.bump(1);
+        break;
+      case EventTypes.PRODUCT_SOLD:
+        this.shimmer.bump(1);
+        break;
+    }
+  }
+
   resize(size) {
     this.size = size;
     this.uniforms.uAspect.value = size.width / size.height;
@@ -200,9 +252,24 @@ export class PresencePrisms extends BaseArt {
     this._frameToggle = !this._frameToggle;
     if (this.phase === 'live' && this._frameToggle) this._updateMask();
     // Presence engages while someone is there; releases ~5s after the last action.
-    const engaged = this.phase === 'live' && this._bgRef && (this.time - this._lastActive) < 5;
+    // Engage while there's recent MOVEMENT; ~3s after motion stops (person left
+    // OR standing still), smoothly release back to the idle breathing.
+    const engaged = this.phase === 'live' && this._bgRef && (this.time - this._lastActive) < 3;
     this._maskEase += ((engaged ? 1 : 0) - this._maskEase) * Math.min(1, dt * 1.5);
     this.uniforms.uMaskOn.value = this._maskEase;
+
+    // Advance visitor ripples (≈1.6s life) and publish to the shader.
+    for (let i = this.ripples.length - 1; i >= 0; i--) {
+      this.ripples[i].t += dt / 1.6;
+      if (this.ripples[i].t >= 1) this.ripples.splice(i, 1);
+    }
+    for (let i = 0; i < RIP_MAX; i++) {
+      const r = this.ripples[i];
+      this.uniforms.uRip.value[i].set(r ? r.x : 0, r ? r.y : 0, r ? r.t : 1);
+    }
+    this.uniforms.uRipCount.value = this.ripples.length;
+    this.uniforms.uPulse.value = this.pulse.update(dt);
+    this.uniforms.uShimmer.value = this.shimmer.update(dt);
     this.uniforms.uTime.value = this.time;
 
     this.renderer.setRenderTarget(this.renderTarget);
