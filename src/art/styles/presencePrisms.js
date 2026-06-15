@@ -23,6 +23,7 @@ import { registerArt } from '../registry.js';
 import { EventTypes } from '../../core/events.js';
 import { NOISE_GLSL } from '../shaderLib.js';
 import { Eased } from '../effects.js';
+import { drawBrandGlyph } from '../../core/brandGlyph.js';
 
 const MASK_W = 128; // background-subtraction grid (small, ~9k px/frame)
 const RIP_MAX = 5;  // concurrent visitor ripples
@@ -35,19 +36,22 @@ const fragmentShader = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
   uniform float uTime, uAspect, uMaskOn, uIdle, uPulse, uShimmer;
-  uniform sampler2D uMask;
+  uniform sampler2D uMask, uLogo;
   uniform vec3 uRip[${RIP_MAX}];   // xy = centre (0..1), z = age (0..1)
   uniform int uRipCount;
   ${NOISE_GLSL}
   void main(){
-    // Idle: a slow drifting noise field lifts a few prisms and lets them settle.
     vec2 p = vUv * vec2(uAspect, 1.0);
-    float n = fbm(p * 3.2 + vec2(uTime * 0.18, uTime * 0.12));
-    float idle = uIdle * (0.12 + 0.88 * smoothstep(0.5, 1.0, n));
+    // IDLE (no one in view) → the active brand's LOGO, gently breathing, over a
+    // faint ambient shimmer so the rest of the wall stays alive.
+    float logo = texture2D(uLogo, vUv).a;
+    float breathe = 0.86 + 0.14 * sin(uTime * 1.1 + vUv.x * 3.0);
+    float ambient = uIdle * 0.09 * smoothstep(0.55, 1.0, fbm(p * 3.2 + vec2(uTime * 0.18, uTime * 0.12)));
+    float idleState = max(logo * breathe, ambient);
 
-    // Presence: the visitor's silhouette (mask) rises the wall in its shape.
+    // PRESENCE → the live silhouette replaces the logo (no presence = logo).
     float sil = clamp(texture2D(uMask, vUv).r * 1.25, 0.0, 1.0);
-    float h = max(idle, sil * uMaskOn);
+    float h = mix(idleState, max(sil, ambient), uMaskOn);
 
     // VISITOR → ripple: rings of rise travel out across the wall.
     for (int i = 0; i < ${RIP_MAX}; i++) {
@@ -87,6 +91,8 @@ export class PresencePrisms extends BaseArt {
     this._calibAt = 0;
     this._frameToggle = false;
     this._lastActive = -Infinity;
+    this.brandId = 'iqos';
+    this._logoCache = {};
 
     // Background-subtraction mask (small grid, linearly filtered on the GPU).
     const aspect = this.size.width / this.size.height;
@@ -122,9 +128,11 @@ export class PresencePrisms extends BaseArt {
       uPulse: { value: 0 },
       uShimmer: { value: 0 },
       uMask: { value: this.maskTex },
+      uLogo: { value: null },
       uRip: { value: Array.from({ length: RIP_MAX }, () => new THREE.Vector3()) },
       uRipCount: { value: 0 },
     };
+    this._buildLogo(this.brandId);
     this.material = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader, fragmentShader });
     this.scene = new THREE.Scene();
     this.camera = new THREE.Camera();
@@ -197,7 +205,16 @@ export class PresencePrisms extends BaseArt {
       if (prev) motion += (Math.abs(cur[p] - prev[p]) + Math.abs(cur[p + 1] - prev[p + 1]) + Math.abs(cur[p + 2] - prev[p + 2])) / 765;
     }
     this._prevCur = cur;
-    if (prev && motion / sm.length > 0.004) this._lastActive = this.time; // someone moved
+    const motionNorm = prev ? motion / sm.length : 0;
+    if (prev && motionNorm > 0.004) this._lastActive = this.time; // someone moved
+    // Adaptive background: when motion is low, slowly absorb the current frame
+    // into the reference, so a stale ghost (or a person who stopped moving)
+    // melts away — no stuck silhouette. Frozen during strong motion so an
+    // active person still reads.
+    if (motionNorm < 0.02) {
+      const adapt = 0.03;
+      for (let p = 0; p < bg.length; p++) bg[p] += (cur[p] - bg[p]) * adapt;
+    }
     const blur = (src, dst) => {
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
         let acc = 0, cnt = 0;
@@ -214,6 +231,31 @@ export class PresencePrisms extends BaseArt {
     }
     this.maskCtx.putImageData(this._maskImage, 0, 0);
     this.maskTex.needsUpdate = true;
+  }
+
+  // The idle logo height-field for a brand (iqos → emblem). Cached per brand,
+  // fitted to the frame aspect; read via the alpha channel in the shader.
+  _buildLogo(brandId) {
+    const id = brandId === 'zyn' || brandId === 'veev' ? brandId : null; // iqos → emblem
+    const key = id || 'iqos';
+    if (!this._logoCache[key]) {
+      const aspect = this.size.width / this.size.height;
+      const W = 256, H = Math.max(8, Math.round(256 / aspect));
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      drawBrandGlyph(c.getContext('2d'), W, H, id);
+      const tex = new THREE.CanvasTexture(c);
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      this._logoCache[key] = tex;
+    }
+    if (this.uniforms) this.uniforms.uLogo.value = this._logoCache[key];
+  }
+
+  // No presence → show this brand's logo (Stage passes the active brand).
+  setBrand(brandId) {
+    this.brandId = brandId;
+    this._buildLogo(brandId);
   }
 
   setParams(p) {
@@ -244,6 +286,10 @@ export class PresencePrisms extends BaseArt {
     this.size = size;
     this.uniforms.uAspect.value = size.width / size.height;
     this.renderTarget.setSize(size.width, size.height);
+    // Rebuild the logo at the new frame aspect (cache is aspect-specific).
+    Object.values(this._logoCache).forEach((t) => t.dispose());
+    this._logoCache = {};
+    this._buildLogo(this.brandId);
   }
 
   update(dt) {
@@ -284,6 +330,7 @@ export class PresencePrisms extends BaseArt {
     if (this.stream) this.stream.getTracks().forEach((tr) => tr.stop());
     if (this.video) this.video.srcObject = null;
     this.maskTex.dispose();
+    Object.values(this._logoCache).forEach((t) => t.dispose());
     this.material.dispose();
     this.renderTarget.dispose();
   }

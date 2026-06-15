@@ -119,7 +119,7 @@ export class Stage {
     const ArtClass = getArt(this.state.artId);
     if (ArtClass && ArtClass.prismRamp) {
       const pal = getBrand(this.state.brands, this.state.activeBrandId).palette;
-      this.target.setHeightRamp(pal.primary, pal.secondary);
+      this.target.setHeightRamp(pal.background, pal.primary); // low rise = bg, high rise = primary
     } else {
       this.target.clearHeightRamp();
     }

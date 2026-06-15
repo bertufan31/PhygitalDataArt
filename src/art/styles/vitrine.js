@@ -29,8 +29,8 @@ import { BaseArt } from '../BaseArt.js';
 import { registerArt } from '../registry.js';
 import { EventTypes } from '../../core/events.js';
 import { Eased } from '../effects.js';
-import { emblemDist } from '../../core/shape.js';
 import { BRAND_SILHOUETTES } from '../../core/brandSilhouettes.data.js';
+import { drawBrandGlyph } from '../../core/brandGlyph.js';
 
 const ROOM = { left: -3.6, right: 3.6, top: 2.1, bottom: -2.2, back: -8.6, exitZ: 2.0, bornZ: -7.6 };
 
@@ -78,39 +78,7 @@ function glyphCanvas(brandId) {
   const W = 1024, H = sil && sil.aspect > 1.4 ? 420 : 1024;
   const mask = document.createElement('canvas');
   mask.width = W; mask.height = H;
-  const mctx = mask.getContext('2d');
-  mctx.fillStyle = '#fff';
-  if (sil) {
-    const xs = sil.polys.flat().map((p) => p[0]), ys = sil.polys.flat().map((p) => p[1]);
-    const bx0 = Math.min(...xs), bx1 = Math.max(...xs), by0 = Math.min(...ys), by1 = Math.max(...ys);
-    const scale = Math.min((W * 0.82) / (bx1 - bx0), (H * 0.78) / (by1 - by0));
-    const cx = (bx0 + bx1) / 2, cy = (by0 + by1) / 2;
-    for (const poly of sil.polys) {
-      mctx.beginPath();
-      poly.forEach(([x, y], i) => {
-        const px = W / 2 + (x - cx) * scale;
-        const py = H / 2 - (y - cy) * scale; // y up → canvas down
-        i === 0 ? mctx.moveTo(px, py) : mctx.lineTo(px, py);
-      });
-      mctx.closePath();
-      mctx.fill();
-    }
-  } else {
-    // IQOS emblem from its analytic SDF
-    const img = mctx.createImageData(W, H);
-    for (let y = 0; y < H; y++) {
-      for (let x = 0; x < W; x++) {
-        const px = ((x + 0.5) / W - 0.5) * 1.18;
-        const py = (0.5 - (y + 0.5) / H) * 1.18;
-        const d = emblemDist(px, py);
-        const a = Math.max(0, Math.min(1, 0.5 - d * 220));
-        const k = (y * W + x) * 4;
-        img.data[k] = img.data[k + 1] = img.data[k + 2] = 255;
-        img.data[k + 3] = a * 255;
-      }
-    }
-    mctx.putImageData(img, 0, 0);
-  }
+  drawBrandGlyph(mask.getContext('2d'), W, H, brandId);
   // halo + crisp composite
   const out = document.createElement('canvas');
   out.width = W; out.height = H;
