@@ -314,12 +314,18 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     setActive(viewBtns, state.viewId);
     setActive(targetBtns, state.targetId);
     setActive(frameBtns, state.frameStyle);
-    // Some arts opt out of the LED-prism target (e.g. the realistic PBR piece).
+    // Some arts pin the display target: PBR piece opts out of prisms; the
+    // prism-relief piece needs them.
+    const ArtClass = getArt(state.artId);
     const prismBtn = targetBtns.get('prism');
     if (prismBtn) {
-      const blocked = !!getArt(state.artId)?.noPrism;
-      prismBtn.disabled = blocked;
-      prismBtn.title = blocked ? 'Not available for this art option' : '';
+      prismBtn.disabled = !!ArtClass?.noPrism;
+      prismBtn.title = ArtClass?.noPrism ? 'Not available for this art option' : '';
+    }
+    const flatBtn = targetBtns.get('flat');
+    if (flatBtn) {
+      flatBtn.disabled = !!ArtClass?.prismOnly;
+      flatBtn.title = ArtClass?.prismOnly ? 'This art runs on the LED prisms' : '';
     }
     simBtn.textContent = state.sim.running ? '■ Pause data feed' : '▶ Resume data feed';
     simBtn.classList.toggle('active', state.sim.running);

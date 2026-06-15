@@ -12,5 +12,6 @@ import './slipstream.js';
 import './vitrine.js';
 import './storePulse.js';
 import './presenceField.js';
+import './presencePrisms.js';
 import './keyAura.js';
 import './keyPattern.js';

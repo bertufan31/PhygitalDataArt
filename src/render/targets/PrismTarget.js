@@ -47,10 +47,12 @@ const prismVertex = /* glsl */ `
   uniform float uBaseDepth;
   varying vec3 vColor;
   varying vec3 vNormal;
+  varying float vH;
   void main(){
     vec4 cell = texture2D(uHeightTex, aCellUv);
     float h = cell.a;
     vColor = cell.rgb;
+    vH = clamp(h, 0.0, 1.0);
     vNormal = normalMatrix * normal;
     // Box spans z in [0, uBaseDepth]; scaling z keeps the back face (z=0)
     // anchored and pushes the front face forward → always connected.
@@ -61,12 +63,17 @@ const prismVertex = /* glsl */ `
 `;
 const prismFragment = /* glsl */ `
   precision highp float;
+  uniform float uRamp;          // 0 = use sampled colour · 1 = height→colour ramp
+  uniform vec3 uRampLo, uRampHi;
   varying vec3 vColor;
   varying vec3 vNormal;
+  varying float vH;
   void main(){
     vec3 n = normalize(vNormal);
     float light = 0.55 + 0.45 * max(dot(n, normalize(vec3(0.35, 0.5, 1.0))), 0.0);
-    gl_FragColor = vec4(vColor * light, 1.0);
+    // Optional spectrum: low rise → uRampLo, high rise → uRampHi.
+    vec3 base = mix(vColor, mix(uRampLo, uRampHi, vH), uRamp);
+    gl_FragColor = vec4(base * light, 1.0);
   }
 `;
 
@@ -132,7 +139,14 @@ export class PrismTarget {
     this.computeScene.add(this.computeQuad);
 
     this.material = new THREE.ShaderMaterial({
-      uniforms: { uHeightTex: { value: this._prev.texture }, uRise: { value: prism.rise ?? 0.32 }, uBaseDepth: { value: baseDepth } },
+      uniforms: {
+        uHeightTex: { value: this._prev.texture },
+        uRise: { value: prism.rise ?? 0.32 },
+        uBaseDepth: { value: baseDepth },
+        uRamp: { value: 0 },
+        uRampLo: { value: new THREE.Color('#000000') },
+        uRampHi: { value: new THREE.Color('#ffffff') },
+      },
       vertexShader: prismVertex,
       fragmentShader: prismFragment,
     });
@@ -152,6 +166,17 @@ export class PrismTarget {
   setTexture(texture) {
     this._srcTex = texture;
     this.computeMat.uniforms.uSrc.value = texture;
+  }
+
+  /** Colour the wall by RISE: low → lo, high → hi (e.g. brand primary→secondary). */
+  setHeightRamp(lo, hi) {
+    this.material.uniforms.uRamp.value = 1;
+    this.material.uniforms.uRampLo.value.set(lo);
+    this.material.uniforms.uRampHi.value.set(hi);
+  }
+
+  clearHeightRamp() {
+    this.material.uniforms.uRamp.value = 0;
   }
 
   addTo(scene) {

@@ -141,6 +141,7 @@ const fragmentShader = /* glsl */ `
 export class PresenceField extends BaseArt {
   static id = 'presence-field';
   static label = 'Presence';
+  static fixedBrand = 'iqos'; // always IQOS — ignores the active brand
   static params = [
     { key: 'count', type: 'range', label: 'Particles', min: 20000, max: 300000, step: 20000, default: 120000 },
     { key: 'size', type: 'range', label: 'Particle size', min: 0.3, max: 4, step: 0.1, default: 1 },

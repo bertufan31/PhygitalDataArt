@@ -97,6 +97,34 @@ export class Stage {
       : { width: Math.round(ART_BASE_RESOLUTION * aspect), height: ART_BASE_RESOLUTION };
   }
 
+  // The brand an art is themed by — some arts are pinned to one (fixedBrand).
+  _themeBrandId(ArtClass) {
+    return (ArtClass && ArtClass.fixedBrand) || this.state.activeBrandId;
+  }
+
+  // Apply the per-art grade theme: own palette if the art owns its look, else
+  // the (possibly pinned) brand palette.
+  _applyGradeTheme(ArtClass) {
+    if (ArtClass.ownLook) {
+      this.grade.setColors(mergedArtParams(this.state, ArtClass.id, ArtClass));
+    } else {
+      this.grade.setColors(brandColorParams(getBrand(this.state.brands, this._themeBrandId(ArtClass))));
+    }
+  }
+
+  // Colour the prism wall by rise (brand primary→secondary) for arts that ask
+  // for it; otherwise the wall uses the sampled artwork colour.
+  _applyPrismRamp() {
+    if (this.state.targetId !== 'prism' || !this.target || !this.target.setHeightRamp) return;
+    const ArtClass = getArt(this.state.artId);
+    if (ArtClass && ArtClass.prismRamp) {
+      const pal = getBrand(this.state.brands, this.state.activeBrandId).palette;
+      this.target.setHeightRamp(pal.primary, pal.secondary);
+    } else {
+      this.target.clearHeightRamp();
+    }
+  }
+
   setArt(artId) {
     const ArtClass = getArt(artId) || getArt(this.state.artId);
     if (!ArtClass) return;
@@ -108,34 +136,36 @@ export class Stage {
     this.state.artId = ArtClass.id;
     this.grade.setSource(this.art.texture);
     this.grade.setColors(params);
-    // Keep an active brand theme — unless the art owns its look (e.g. the
-    // realistic PBR piece, whose brand identity lives in its materials).
-    if (this._brandColors && !ArtClass.ownLook) this.grade.setColors(this._brandColors);
-    // brand-aware arts morph to it / re-dress (full brand record incl. textures)
-    this.art.setBrand(this.state.activeBrandId, getBrand(this.state.brands, this.state.activeBrandId));
+    this._applyGradeTheme(ArtClass); // honour fixedBrand / ownLook
+    const themeId = this._themeBrandId(ArtClass);
+    this.art.setBrand(themeId, getBrand(this.state.brands, themeId)); // morph / re-dress
     if (ArtClass.noPrism && this.state.targetId === 'prism') this.setTarget('flat');
+    else if (ArtClass.prismOnly && this.state.targetId !== 'prism') this.setTarget('prism');
     if (this.target) this.target.setTexture(this.grade.texture);
+    this._applyPrismRamp();
   }
 
   /**
    * Make a brand the focus: brand-aware arts (e.g. Key Particles) morph toward
    * its form, and the whole piece is re-themed to the brand palette/background.
+   * Arts pinned to a brand (fixedBrand) are unaffected by the grade re-theme.
    */
   setActiveBrand(brandId) {
     this.state.activeBrandId = brandId;
     this._brandColors = brandColorParams(getBrand(this.state.brands, brandId));
     const ArtClass = getArt(this.state.artId);
-    if (ArtClass?.ownLook) {
-      // The art owns its look (PBR materials carry the brand) — keep its own palette.
-      this.grade.setColors(mergedArtParams(this.state, this.state.artId, ArtClass));
-    } else {
-      this.grade.setColors(this._brandColors);
+    this._applyGradeTheme(ArtClass);
+    if (this.art) {
+      const themeId = this._themeBrandId(ArtClass);
+      this.art.setBrand(themeId, getBrand(this.state.brands, themeId));
     }
-    if (this.art) this.art.setBrand(brandId, getBrand(this.state.brands, brandId));
+    this._applyPrismRamp(); // prism-ramp arts follow the active brand's spectrum
   }
 
   setTarget(targetId) {
-    if (targetId === 'prism' && getArt(this.state.artId)?.noPrism) targetId = 'flat'; // art opts out of prisms
+    const ArtClass = getArt(this.state.artId);
+    if (targetId === 'prism' && ArtClass?.noPrism) targetId = 'flat'; // art opts out of prisms
+    if (targetId !== 'prism' && ArtClass?.prismOnly) targetId = 'prism'; // art needs prisms
     if (this.target) this.target.dispose(this.scene);
     const aspect = this._frameAspect();
     if (targetId === 'prism') {
@@ -147,6 +177,7 @@ export class Stage {
     this.target.addTo(this.scene);
     this.target.setTexture(this.grade.texture);
     this.state.targetId = targetId;
+    this._applyPrismRamp();
   }
 
   setView(viewId) {
