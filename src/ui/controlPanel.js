@@ -112,7 +112,13 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     class: 'opt opt--wide',
     onclick: () => dispatch(makeCommand(CommandTypes.SET_BRAND_CYCLE, { running: !state.brandCycle.running })),
   });
-  const brandBody = el('div', { class: 'stack' }, [brandRow, brandCycleBtn]);
+  // Auto-cycle interval (seconds between brand changes).
+  const brandPeriodInput = el('input', {
+    type: 'number', min: '2', max: '600',
+    onchange: (e) => dispatch(makeCommand(CommandTypes.SET_BRAND_CYCLE, { period: clampNum(e.target.value, 2, 600, state.brandCycle.period) })),
+  });
+  const brandPeriodField = el('label', { class: 'field' }, [el('span', { text: 'Seconds / change' }), brandPeriodInput]);
+  const brandBody = el('div', { class: 'stack' }, [brandRow, brandCycleBtn, brandPeriodField]);
 
   // -- Display target ----------------------------------------------------
   const targetRow = el('div', { class: 'btn-grid' });
@@ -331,6 +337,7 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     simBtn.classList.toggle('active', state.sim.running);
     brandCycleBtn.textContent = state.brandCycle.running ? '■ Pause brand cycle' : '▶ Resume brand cycle';
     brandCycleBtn.classList.toggle('active', state.brandCycle.running);
+    if (document.activeElement !== brandPeriodInput) brandPeriodInput.value = String(state.brandCycle.period);
     rateSlider.value = String(state.sim.rate);
     rateLabel.textContent = `${state.sim.rate.toFixed(2)}×`;
     if (document.activeElement !== fW.input) fW.input.value = String(state.frame.w);

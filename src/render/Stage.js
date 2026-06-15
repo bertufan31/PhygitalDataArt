@@ -151,15 +151,26 @@ export class Stage {
    * Arts pinned to a brand (fixedBrand) are unaffected by the grade re-theme.
    */
   setActiveBrand(brandId) {
+    const prevId = this.state.activeBrandId;
     this.state.activeBrandId = brandId;
     this._brandColors = brandColorParams(getBrand(this.state.brands, brandId));
     const ArtClass = getArt(this.state.artId);
     this._applyGradeTheme(ArtClass);
-    if (this.art) {
-      const themeId = this._themeBrandId(ArtClass);
-      this.art.setBrand(themeId, getBrand(this.state.brands, themeId));
+    // Prism-ramp arts (Presence Prisms) get a smooth ripple transition that
+    // wipes colour + logo from the centre out; everything else changes instantly.
+    if (ArtClass?.prismRamp && prevId !== brandId && this.art?.beginBrandTransition &&
+        this.target?.beginRampTransition && this.state.targetId === 'prism') {
+      const op = getBrand(this.state.brands, prevId).palette;
+      const np = getBrand(this.state.brands, brandId).palette;
+      this.target.beginRampTransition(op.background, op.primary, np.background, np.primary);
+      this.art.beginBrandTransition(brandId);
+    } else {
+      if (this.art) {
+        const themeId = this._themeBrandId(ArtClass);
+        this.art.setBrand(themeId, getBrand(this.state.brands, themeId));
+      }
+      this._applyPrismRamp();
     }
-    this._applyPrismRamp(); // prism-ramp arts follow the active brand's spectrum
   }
 
   setTarget(targetId) {

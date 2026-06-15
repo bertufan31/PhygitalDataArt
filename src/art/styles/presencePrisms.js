@@ -35,23 +35,29 @@ const vertexShader = /* glsl */ `
 const fragmentShader = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
-  uniform float uTime, uAspect, uMaskOn, uIdle, uPulse, uShimmer;
-  uniform sampler2D uMask, uLogo;
+  uniform float uTime, uAspect, uMaskOn, uIdle, uPulse, uShimmer, uLogoAmt, uTrans, uFront;
+  uniform sampler2D uMask, uLogo, uLogoPrev;
   uniform vec3 uRip[${RIP_MAX}];   // xy = centre (0..1), z = age (0..1)
   uniform int uRipCount;
   ${NOISE_GLSL}
   void main(){
     vec2 p = vUv * vec2(uAspect, 1.0);
-    // IDLE (no one in view) → the active brand's LOGO, gently breathing, over a
-    // faint ambient shimmer so the rest of the wall stays alive.
-    float logo = texture2D(uLogo, vUv).a;
+    // BRAND TRANSITION: a ripple from the centre wipes the OLD logo → NEW logo.
+    float dd = length((vUv - 0.5) * vec2(uAspect, 1.0));
+    float frontMix = (uTrans > 0.5) ? smoothstep(uFront + 0.05, uFront - 0.05, dd) : 1.0;
+    float logo = mix(texture2D(uLogoPrev, vUv).a, texture2D(uLogo, vUv).a, frontMix);
+    float transRing = (uTrans > 0.5) ? exp(-pow((dd - uFront) / 0.07, 2.0)) : 0.0;
+
+    // IDLE (no one in view) → the active brand's LOGO blooms in (uLogoAmt rises
+    // after a few seconds of stillness), over a faint ambient shimmer.
     float breathe = 0.86 + 0.14 * sin(uTime * 1.1 + vUv.x * 3.0);
     float ambient = uIdle * 0.09 * smoothstep(0.55, 1.0, fbm(p * 3.2 + vec2(uTime * 0.18, uTime * 0.12)));
-    float idleState = max(logo * breathe, ambient);
+    float idleState = max(logo * uLogoAmt * breathe, ambient);
 
     // PRESENCE → the live silhouette replaces the logo (no presence = logo).
     float sil = clamp(texture2D(uMask, vUv).r * 1.25, 0.0, 1.0);
     float h = mix(idleState, max(sil, ambient), uMaskOn);
+    h = max(h, transRing * 0.9); // the brand-change ripple lifts the wall as it passes
 
     // VISITOR → ripple: rings of rise travel out across the wall.
     for (int i = 0; i < ${RIP_MAX}; i++) {
@@ -129,6 +135,10 @@ export class PresencePrisms extends BaseArt {
       uShimmer: { value: 0 },
       uMask: { value: this.maskTex },
       uLogo: { value: null },
+      uLogoPrev: { value: null },
+      uLogoAmt: { value: 1 },
+      uTrans: { value: 0 },
+      uFront: { value: 0 },
       uRip: { value: Array.from({ length: RIP_MAX }, () => new THREE.Vector3()) },
       uRipCount: { value: 0 },
     };
@@ -256,6 +266,18 @@ export class PresencePrisms extends BaseArt {
   setBrand(brandId) {
     this.brandId = brandId;
     this._buildLogo(brandId);
+    if (this.uniforms) this.uniforms.uLogoPrev.value = this.uniforms.uLogo.value; // no cross-fade
+  }
+
+  // Smooth brand change: ripple from the centre that swaps colour + logo behind it.
+  beginBrandTransition(brandId) {
+    if (!this.uniforms) { this.setBrand(brandId); return; }
+    this.uniforms.uLogoPrev.value = this.uniforms.uLogo.value; // current logo = "from"
+    this.brandId = brandId;
+    this._buildLogo(brandId); // uLogo = "to"
+    this.uniforms.uTrans.value = 1;
+    this.uniforms.uFront.value = 0;
+    this._tBrand = 0;
   }
 
   setParams(p) {
@@ -298,11 +320,27 @@ export class PresencePrisms extends BaseArt {
     this._frameToggle = !this._frameToggle;
     if (this.phase === 'live' && this._frameToggle) this._updateMask();
     // Presence engages while someone is there; releases ~5s after the last action.
-    // Engage while there's recent MOVEMENT; ~3s after motion stops (person left
-    // OR standing still), smoothly release back to the idle breathing.
-    const engaged = this.phase === 'live' && this._bgRef && (this.time - this._lastActive) < 3;
-    this._maskEase += ((engaged ? 1 : 0) - this._maskEase) * Math.min(1, dt * 1.5);
+    // Engage the silhouette only while there's recent MOVEMENT; it fades ~1.5s
+    // after motion stops. After 6s of stillness the LOGO blooms in to full
+    // glory (and it's the default whenever the camera is off).
+    const idleTime = this.time - this._lastActive;
+    const engaged = this.phase === 'live' && this._bgRef && idleTime < 1.5;
+    this._maskEase += ((engaged ? 1 : 0) - this._maskEase) * Math.min(1, dt * 2.2);
     this.uniforms.uMaskOn.value = this._maskEase;
+    this.uniforms.uLogoAmt.value = THREE.MathUtils.smoothstep(idleTime, 6, 8.5);
+
+    // Advance an in-flight brand-change ripple (centre → edges), then finalise.
+    if (this._tBrand != null) {
+      this._tBrand = Math.min(1, this._tBrand + dt / 1.6);
+      const e = this._tBrand * this._tBrand * (3 - 2 * this._tBrand);
+      const maxR = 0.5 * Math.hypot(this.uniforms.uAspect.value, 1) + 0.1;
+      this.uniforms.uFront.value = e * maxR;
+      if (this._tBrand >= 1) {
+        this._tBrand = null;
+        this.uniforms.uTrans.value = 0;
+        this.uniforms.uLogoPrev.value = this.uniforms.uLogo.value;
+      }
+    }
 
     // Advance visitor ripples (≈1.6s life) and publish to the shader.
     for (let i = this.ripples.length - 1; i >= 0; i--) {

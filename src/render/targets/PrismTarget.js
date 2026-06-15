@@ -45,40 +45,55 @@ const prismVertex = /* glsl */ `
   uniform sampler2D uHeightTex;
   uniform float uRise;
   uniform float uBaseDepth;
+  uniform float uTrans, uFront, uTransAspect;  // ramp cross-fade ripple
   varying vec3 vColor;
   varying vec3 vNormal;
   varying float vH;
+  varying float vFrontMix;   // 1 behind the ripple front (new ramp), 0 ahead (old)
+  varying float vRing;
   void main(){
     vec4 cell = texture2D(uHeightTex, aCellUv);
     float h = cell.a;
     vColor = cell.rgb;
     vH = clamp(h, 0.0, 1.0);
+    // Radial ripple front from the centre (in aspect-corrected cell space).
+    float dd = length((aCellUv - 0.5) * vec2(uTransAspect, 1.0));
+    vFrontMix = uTrans * smoothstep(uFront + 0.05, uFront - 0.05, dd);
+    vRing = uTrans * exp(-pow((dd - uFront) / 0.07, 2.0));
     vNormal = normalMatrix * normal;
-    // Box spans z in [0, uBaseDepth]; scaling z keeps the back face (z=0)
-    // anchored and pushes the front face forward → always connected.
+    // The ripple front lifts the prisms a little as it passes.
+    float hh = h + vRing * 0.35;
     vec3 pos = position;
-    pos.z *= 1.0 + (h * uRise) / uBaseDepth;
+    pos.z *= 1.0 + (hh * uRise) / uBaseDepth;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(pos + aOffset, 1.0);
   }
 `;
 const prismFragment = /* glsl */ `
   precision highp float;
   uniform float uRamp;          // 0 = use sampled colour · 1 = height→colour ramp
-  uniform vec3 uRampLo, uRampHi;
+  uniform vec3 uRampLo, uRampHi;     // current (old) ramp
+  uniform vec3 uRampLo2, uRampHi2;   // incoming (new) ramp during a transition
   varying vec3 vColor;
   varying vec3 vNormal;
   varying float vH;
+  varying float vFrontMix;
+  varying float vRing;
   void main(){
     vec3 n = normalize(vNormal);
     float light = 0.55 + 0.45 * max(dot(n, normalize(vec3(0.35, 0.5, 1.0))), 0.0);
-    // Optional spectrum: low rise → uRampLo, high rise → uRampHi.
-    vec3 base = mix(vColor, mix(uRampLo, uRampHi, vH), uRamp);
+    // Spectrum: low rise → lo, high rise → hi; cross-faded across the ripple front.
+    vec3 lo = mix(uRampLo, uRampLo2, vFrontMix);
+    vec3 hi = mix(uRampHi, uRampHi2, vFrontMix);
+    vec3 base = mix(vColor, mix(lo, hi, vH), uRamp);
+    base += vRing * 0.45; // bright crest at the travelling front
     gl_FragColor = vec4(base * light, 1.0);
   }
 `;
 
 export class PrismTarget {
   constructor({ aspect, prism }) {
+    this.aspect = aspect;
+    this._tRamp = null; // active ramp-transition clock
     this.smoothing = prism.smoothing ?? 0.32; // seconds for the wall to settle
     const cols = Math.max(1, prism.cols | 0);
     const rows = Math.max(1, prism.rows | 0);
@@ -146,6 +161,11 @@ export class PrismTarget {
         uRamp: { value: 0 },
         uRampLo: { value: new THREE.Color('#000000') },
         uRampHi: { value: new THREE.Color('#ffffff') },
+        uRampLo2: { value: new THREE.Color('#000000') },
+        uRampHi2: { value: new THREE.Color('#ffffff') },
+        uTrans: { value: 0 },
+        uFront: { value: 0 },
+        uTransAspect: { value: aspect },
       },
       vertexShader: prismVertex,
       fragmentShader: prismFragment,
@@ -168,15 +188,34 @@ export class PrismTarget {
     this.computeMat.uniforms.uSrc.value = texture;
   }
 
-  /** Colour the wall by RISE: low → lo, high → hi (e.g. brand primary→secondary). */
+  /** Colour the wall by RISE: low → lo, high → hi (e.g. brand background→primary). */
   setHeightRamp(lo, hi) {
-    this.material.uniforms.uRamp.value = 1;
-    this.material.uniforms.uRampLo.value.set(lo);
-    this.material.uniforms.uRampHi.value.set(hi);
+    const u = this.material.uniforms;
+    u.uRamp.value = 1;
+    u.uRampLo.value.set(lo);
+    u.uRampHi.value.set(hi);
+    u.uTrans.value = 0;
+    this._tRamp = null;
   }
 
   clearHeightRamp() {
     this.material.uniforms.uRamp.value = 0;
+    this.material.uniforms.uTrans.value = 0;
+    this._tRamp = null;
+  }
+
+  /** Cross-fade the rise ramp from (loA,hiA) → (loB,hiB) via a ripple from centre. */
+  beginRampTransition(loA, hiA, loB, hiB, dur = 1.6) {
+    const u = this.material.uniforms;
+    u.uRamp.value = 1;
+    u.uRampLo.value.set(loA); u.uRampHi.value.set(hiA);
+    u.uRampLo2.value.set(loB); u.uRampHi2.value.set(hiB);
+    u.uTrans.value = 1;
+    u.uFront.value = 0;
+    u.uTransAspect.value = this.aspect;
+    this._rampB = [loB, hiB];
+    this._tRamp = 0;
+    this._tRampDur = dur;
   }
 
   addTo(scene) {
@@ -186,6 +225,20 @@ export class PrismTarget {
 
   // Called each frame by the Stage: ease the buffer toward the current artwork.
   update(renderer, dt) {
+    // Advance an in-flight ramp ripple (centre → edges), then finalise.
+    if (this._tRamp != null) {
+      this._tRamp = Math.min(1, this._tRamp + dt / this._tRampDur);
+      const e = this._tRamp * this._tRamp * (3 - 2 * this._tRamp); // smoothstep
+      const maxR = 0.5 * Math.hypot(this.aspect, 1) + 0.1;
+      const u = this.material.uniforms;
+      u.uFront.value = e * maxR;
+      if (this._tRamp >= 1) {
+        u.uRampLo.value.copy(u.uRampLo2.value);
+        u.uRampHi.value.copy(u.uRampHi2.value);
+        u.uTrans.value = 0;
+        this._tRamp = null;
+      }
+    }
     if (!this._srcTex) return;
     const tau = Math.max(0.02, this.smoothing);
     this.computeMat.uniforms.uMix.value = this._primed ? Math.min(1, dt / tau) : 1;
