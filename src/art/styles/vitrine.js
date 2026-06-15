@@ -221,7 +221,7 @@ export class Vitrine extends BaseArt {
         // dark navy room so the pale objects pop; cubes get a clear ZYN-blue cast
         cube: new THREE.MeshPhysicalMaterial({ color: 0x9fd4ec, metalness: 0, roughness: 0.28, clearcoat: 0.8, clearcoatRoughness: 0.2, envMapIntensity: 1.0 }),
         sphere: new THREE.MeshStandardMaterial({ color: 0xefe3c8, metalness: 0, roughness: 0.93, bumpMap: this.tex.paper, bumpScale: 0.35, envMapIntensity: 0.55 }),
-        bg: 0x0c1d2d, floor: 0x112638, wall: 0x0a1926, fog: 0.07,
+        bg: 0x0c1d2d, floor: 0x112638, wall: 0x0a1926, fog: 0.045,
         key: 3.0, hemi: 0.7, fill: 0.5, fillColor: 0x9fd8ff, rim: 0.4, logo: 0x00a9e0,
       },
       veev: {
@@ -253,22 +253,25 @@ export class Vitrine extends BaseArt {
 
   _kitId(brandId) { return this.kits[brandId] ? brandId : 'iqos'; }
 
-  // CMS-uploaded textures become material variants (one clone per texture);
-  // objects pick a variant by their index, so multiple textures distribute.
-  _buildVariants(kit) {
+  // CMS-uploaded textures become standalone OPAQUE material variants so the
+  // uploaded image always reads as the surface — independent of the brand's
+  // own (diffuse / transparent / fogged) material. One variant per texture;
+  // objects pick by index, so multiple textures distribute across them.
+  _buildVariants() {
     this._disposeVariants();
-    const make = (baseMat, list) => (list || []).slice(0, 8).map((t) => {
+    const make = (kind, list) => (list || []).slice(0, 8).map((t) => {
       const tex = new THREE.TextureLoader().load(t.src);
       tex.colorSpace = THREE.SRGBColorSpace;
       tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      const m = baseMat.clone();
-      m.map = tex;
-      m.color.set(0xffffff); // let the uploaded texture carry the colour
-      m.needsUpdate = true;
-      return m;
+      return new THREE.MeshStandardMaterial({
+        map: tex,
+        roughness: kind === 'cube' ? 0.5 : 0.8,
+        metalness: kind === 'cube' ? 0.3 : 0.0,
+        envMapIntensity: 0.5,
+      });
     });
-    this._cubeVar = make(kit.cube, this.brandData?.textures?.cubes);
-    this._sphereVar = make(kit.sphere, this.brandData?.textures?.spheres);
+    this._cubeVar = make('cube', this.brandData?.textures?.cubes);
+    this._sphereVar = make('sphere', this.brandData?.textures?.spheres);
   }
 
   _disposeVariants() {
@@ -298,7 +301,7 @@ export class Vitrine extends BaseArt {
     this.fill.intensity = kit.fill;
     this.fill.color.set(kit.fillColor);
     this.rim.intensity = kit.rim;
-    this._buildVariants(kit);
+    this._buildVariants();
     for (const o of this.objects) {
       o.mesh.material = this._materialFor(o.kind, o.idx);
     }
@@ -322,7 +325,7 @@ export class Vitrine extends BaseArt {
     const mesh = new THREE.Mesh(kind === 'cube' ? this.cubeGeo : this.sphereGeo, this._materialFor(kind, idx));
     mesh.castShadow = true;
     mesh.receiveShadow = true;
-    const o = { mesh, kind, idx, home: new THREE.Vector3(), base: 1, kR: kind === 'cube' ? 0.64 : 0.5, curR: 0.3, age: 0, vz: 0, vx: 0, rot: new THREE.Vector3(), spin: new THREE.Vector3() };
+    const o = { mesh, kind, idx, home: new THREE.Vector3(), base: 1, kR: kind === 'cube' ? 0.6 : 0.5, curR: 0.3, age: 0, vz: 0, vx: 0, rot: new THREE.Vector3(), spin: new THREE.Vector3() };
     this._reseed(o, initial);
     this.scene.add(mesh);
     return o;
@@ -363,6 +366,30 @@ export class Vitrine extends BaseArt {
     for (let i = 0; i < this.spheres; i++) this.objects.push(this._spawn('sphere', true));
   }
 
+  // SOLID BODIES: firm pairwise separation (positional relaxation) on either the
+  // `home` targets or the rendered mesh positions, so objects hit and push each
+  // other apart instead of interpenetrating. Several iterations → rigid contact.
+  _relax(iters, onHome) {
+    const objs = this.objects;
+    for (let it = 0; it < iters; it++) {
+      for (let a = 0; a < objs.length; a++) {
+        const A = objs[a]; const pa = onHome ? A.home : A.mesh.position;
+        for (let b = a + 1; b < objs.length; b++) {
+          const B = objs[b]; const pb = onHome ? B.home : B.mesh.position;
+          const dx = pb.x - pa.x, dy = pb.y - pa.y, dz = pb.z - pa.z;
+          const rr = A.curR + B.curR;
+          const d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 >= rr * rr || d2 < 1e-9) continue;
+          const d = Math.sqrt(d2);
+          const push = (rr - d) * 0.5;            // split the overlap between the pair
+          const nx = dx / d, ny = dy / d, nz = dz / d;
+          pa.x -= nx * push; pa.y -= ny * push; pa.z -= nz * push;
+          pb.x += nx * push; pb.y += ny * push; pb.z += nz * push;
+        }
+      }
+    }
+  }
+
   /** Brand identity = material kit (+ any CMS-uploaded cube/sphere textures). */
   setBrand(brandId, brand) {
     const sameBrand = brandId === this.brandId;
@@ -400,8 +427,7 @@ export class Vitrine extends BaseArt {
         break;
       case EventTypes.SALE_MADE:
       case EventTypes.FLAVOUR_SOLD:
-        this.signMat.color.set(event.data?.color || this.kits[this._kitId(this.brandId)].logo);
-        this.signPulse.bump(1); // the brand sign flickers awake in the event colour
+        this.signPulse.bump(1); // the brand sign glows brighter (its colour never changes)
         break;
       case EventTypes.PRODUCT_SOLD:
         this.jolt.bump(1); // a shiver runs through the objects
@@ -447,26 +473,9 @@ export class Vitrine extends BaseArt {
       o.curR = o.base * o.kR * Math.max(grow, 0.05);
     }
 
-    // 2) SOLID BODIES: pairwise sphere-bound separation (soft relaxation) so
-    //    cubes and spheres never pass through each other.
-    const relax = Math.min(1, dt * 6);
-    for (let a = 0; a < this.objects.length; a++) {
-      const A = this.objects[a];
-      for (let b = a + 1; b < this.objects.length; b++) {
-        const B = this.objects[b];
-        const dx = B.home.x - A.home.x;
-        const dy = B.home.y - A.home.y;
-        const dz = B.home.z - A.home.z;
-        const rr = (A.curR + B.curR) * 1.02;
-        const d2 = dx * dx + dy * dy + dz * dz;
-        if (d2 >= rr * rr) continue;
-        const d = Math.max(Math.sqrt(d2), 1e-3);
-        const push = (rr - d) * 0.5 * relax;
-        const nx = dx / d, ny = dy / d, nz = dz / d;
-        A.home.x -= nx * push; A.home.y -= ny * push; A.home.z -= nz * push;
-        B.home.x += nx * push; B.home.y += ny * push; B.home.z += nz * push;
-      }
-    }
+    // 2) Solid bodies: firm separation of the drift TARGETS (stable, non-
+    //    overlapping homes to ease toward).
+    this._relax(4, true);
 
     // 3) Pose, touch parting, and off-screen recycling.
     const camX = this.camera.position.x, camY = this.camera.position.y, camZ = this.camera.position.z;
@@ -490,14 +499,17 @@ export class Vitrine extends BaseArt {
         px += dx * inv * push;
         py += dy * inv * push * 0.8;
       }
-      const ease = Math.min(1, dt * 5);
+      const ease = Math.min(1, dt * 9); // snappy, so contact reads as solid
       o.mesh.position.x += (px - o.mesh.position.x) * ease;
       o.mesh.position.y += (py - o.mesh.position.y) * ease;
-      o.mesh.position.z = o.home.z;
+      o.mesh.position.z += (o.home.z - o.mesh.position.z) * ease;
+    }
 
-      // Recycle ONLY once fully outside the view (its whole bounding sphere has
-      // left the frustum, with margin) — nothing pops mid-frame any more.
-      const r = o.curR * 1.3;
+    // 4) Final separation on the RENDERED positions, so what's on screen never
+    //    interpenetrates (hit + push), then recycle anything fully off-screen.
+    this._relax(3, false);
+    for (const o of this.objects) {
+      const r = o.curR * 1.25;
       const dist = camZ - o.mesh.position.z;
       if (dist < -r) { this._reseed(o); continue; }       // fully past the window
       if (dist > 0.3) {
@@ -509,11 +521,9 @@ export class Vitrine extends BaseArt {
       }
     }
 
-    // The brand sign: revealed by touch, or flickering briefly on a sale.
+    // The brand sign: revealed by touch, or glowing briefly on a sale. Its
+    // colour is the brand's own (set in _applyKit) and is never changed here.
     this.signMat.opacity = Math.min(1, reveal * 1.15 + sp * 0.9);
-    if (!this._ptrActive && sp < 0.02 && this.signMat.color.getHex() !== kit.logo) {
-      this.signMat.color.set(kit.logo); // restore brand glow after an event colour
-    }
 
     this.renderer.setRenderTarget(this.renderTarget);
     this.renderer.render(this.scene, this.camera);
