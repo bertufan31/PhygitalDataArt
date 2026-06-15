@@ -1,20 +1,19 @@
 // ---------------------------------------------------------------------------
-// Art option: "Presence Prisms" — the camera drives the physical LED-prism wall.
+// Art option: "Presence Prisms" — camera-reactive LED-prism wall.
 //
-// This piece is designed for the LED PRISMS target only (prismOnly): it outputs
-// a grayscale HEIGHT FIELD that the prism wall turns into rise. A height→colour
-// ramp on the prisms paints the wall in the active brand's spectrum — lowest
-// rise = brand PRIMARY, highest rise = brand SECONDARY (prismRamp).
+// The BASE is the Key-Particles language rendered as a height field: a rotating
+// 3D point-cloud of the active brand mark (emblem / ZYN / VEEV) that slowly
+// turns and morphs when the brand changes. The prism wall reads its density as
+// rise, coloured by the brand spectrum (low rise = background, high = primary).
 //
-//   • IDLE (nothing in view): a slow noise field nudges scattered prisms up a
-//     little and lets them settle back — the wall breathes.
-//   • PRESENCE: a person/object the camera sees is separated from the
-//     background and its SILHOUETTE rises the prisms in that shape.
+// PRESENCE: when the camera sees movement, the visitor's SILHOUETTE rises on
+// top of the logo, highlighting them; it releases ~1.5s after movement stops,
+// leaving the rotating logo. The silhouette is background-subtracted then
+// morphologically CLOSED so the body fills solid (no holes in low-contrast
+// areas like a face). Private — the camera image is never shown.
 //
-// Privacy: the camera image is never shown — only the silhouette height drives
-// the wall. Tap once to enable the camera, tap again to recalibrate the empty
-// scene. After ~5s with no activity it returns to the idle breathing.
-// ownLook keeps the grade neutral so the height field passes through cleanly.
+// Data reactions: visitor → a ripple ring · sale/flavour → a wall-wide surge ·
+// product → a shimmer. prismOnly + prismRamp + ownLook (see Stage).
 // ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
@@ -23,56 +22,74 @@ import { registerArt } from '../registry.js';
 import { EventTypes } from '../../core/events.js';
 import { NOISE_GLSL } from '../shaderLib.js';
 import { Eased } from '../effects.js';
-import { drawBrandGlyph } from '../../core/brandGlyph.js';
+import { samplePoints, sdfAt } from '../../core/shape.js';
+import { hasBrandSilhouette, sampleBrandPoints } from '../../core/brandShapes.js';
 
-const MASK_W = 128; // background-subtraction grid (small, ~9k px/frame)
-const RIP_MAX = 5;  // concurrent visitor ripples
+const MASK_W = 128;       // background-subtraction grid
+const RIP_MAX = 5;        // concurrent visitor ripples
+const SHAPE_SCALE = 1.5;  // logo fills the wall (samples are ~[-0.5,0.5])
 
-const vertexShader = /* glsl */ `
+// --- the rotating brand point-cloud (renders a grayscale density field) ----
+const logoVertex = /* glsl */ `
+  precision highp float;
+  attribute float aPhase;
+  attribute float aSize;
+  attribute vec3 aTarget;
+  uniform float uTime, uPixel, uSizeScale, uMorph;
+  varying float vA;
+  void main(){
+    vec3 pos = mix(position, aTarget, uMorph);
+    pos.z += sin(uTime * 0.5 + aPhase * 6.2831) * 0.05; // subtle depth life
+    vA = 0.85;
+    vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+    gl_Position = projectionMatrix * mv;
+    gl_PointSize = aSize * uPixel * uSizeScale * (6.0 / -mv.z);
+  }
+`;
+const logoFragment = /* glsl */ `
+  precision highp float;
+  varying float vA;
+  void main(){
+    vec2 c = gl_PointCoord - 0.5;
+    float m = smoothstep(0.5, 0.0, length(c));
+    gl_FragColor = vec4(vec3(0.85, 0.92, 1.0) * m * vA, m * vA);
+  }
+`;
+
+// --- compositor: logo density + silhouette + reactions → prism height ------
+const compVertex = /* glsl */ `
   varying vec2 vUv;
   void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
 `;
-const fragmentShader = /* glsl */ `
+const compFragment = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
-  uniform float uTime, uAspect, uMaskOn, uIdle, uPulse, uShimmer, uLogoAmt, uTrans, uFront;
-  uniform sampler2D uMask, uLogo, uLogoPrev;
-  uniform vec3 uRip[${RIP_MAX}];   // xy = centre (0..1), z = age (0..1)
+  uniform sampler2D uLogoTex, uMask;
+  uniform float uTime, uAspect, uMaskOn, uPulse, uShimmer;
+  uniform vec3 uRip[${RIP_MAX}];
   uniform int uRipCount;
   ${NOISE_GLSL}
   void main(){
     vec2 p = vUv * vec2(uAspect, 1.0);
-    // BRAND TRANSITION: a ripple from the centre wipes the OLD logo → NEW logo.
-    float dd = length((vUv - 0.5) * vec2(uAspect, 1.0));
-    float frontMix = (uTrans > 0.5) ? smoothstep(uFront + 0.05, uFront - 0.05, dd) : 1.0;
-    float logo = mix(texture2D(uLogoPrev, vUv).a, texture2D(uLogo, vUv).a, frontMix);
-    float transRing = (uTrans > 0.5) ? exp(-pow((dd - uFront) / 0.07, 2.0)) : 0.0;
+    // Base: the rotating brand logo (always present), as a height field.
+    float logoH = clamp(texture2D(uLogoTex, vUv).g * 2.6, 0.0, 1.0);
+    // Presence: the visitor's filled silhouette rises ON TOP when they move.
+    float sil = clamp(texture2D(uMask, vUv).r * 1.3, 0.0, 1.0);
+    float h = max(logoH, sil * uMaskOn);
 
-    // IDLE (no one in view) → the active brand's LOGO blooms in (uLogoAmt rises
-    // after a few seconds of stillness), over a faint ambient shimmer.
-    float breathe = 0.86 + 0.14 * sin(uTime * 1.1 + vUv.x * 3.0);
-    float ambient = uIdle * 0.09 * smoothstep(0.55, 1.0, fbm(p * 3.2 + vec2(uTime * 0.18, uTime * 0.12)));
-    float idleState = max(logo * uLogoAmt * breathe, ambient);
-
-    // PRESENCE → the live silhouette replaces the logo (no presence = logo).
-    float sil = clamp(texture2D(uMask, vUv).r * 1.25, 0.0, 1.0);
-    float h = mix(idleState, max(sil, ambient), uMaskOn);
-    h = max(h, transRing * 0.9); // the brand-change ripple lifts the wall as it passes
-
-    // VISITOR → ripple: rings of rise travel out across the wall.
+    // VISITOR → ripple rings travel out across the wall.
     for (int i = 0; i < ${RIP_MAX}; i++) {
       if (i >= uRipCount) break;
       vec2 c = uRip[i].xy * vec2(uAspect, 1.0);
       float age = uRip[i].z;
       float ring = exp(-pow((distance(p, c) - age * 1.2) * 6.0, 2.0)) * (1.0 - age);
-      h = max(h, ring * 0.95);
+      h = max(h, ring * 0.9);
     }
-    // SALE / FLAVOUR → the whole wall surges up (toward the secondary colour).
+    // SALE → the whole wall surges up; PRODUCT → a shimmer jolts the prisms.
     h = max(h, uPulse * (0.7 + 0.3 * fbm(p * 2.0 + uTime * 0.5)));
-    // PRODUCT → a shimmer jolts scattered prisms.
     h += uShimmer * smoothstep(0.45, 1.0, snoise(p * 9.0 + uTime * 6.0)) * 0.7;
 
-    gl_FragColor = vec4(vec3(clamp(h, 0.0, 1.0)), 1.0); // height → prism rise + ramp
+    gl_FragColor = vec4(vec3(clamp(h, 0.0, 1.0)), 1.0);
   }
 `;
 
@@ -81,72 +98,93 @@ export class PresencePrisms extends BaseArt {
   static label = 'Presence Prisms';
   static ownLook = true;   // grade stays neutral (height field passes through)
   static prismOnly = true; // runs on the LED-prism wall
-  static prismRamp = true; // wall coloured by rise: primary (low) → secondary (high)
+  static prismRamp = true; // wall coloured by rise: background (low) → primary (high)
   static params = [
+    { key: 'count', type: 'range', label: 'Particles', min: 20000, max: 150000, step: 10000, default: 60000 },
+    { key: 'size', type: 'range', label: 'Particle size', min: 0.5, max: 4, step: 0.1, default: 1.6 },
+    { key: 'spin', type: 'range', label: 'Spin', min: 0, max: 1, step: 0.05, default: 0.18 },
     { key: 'sensitivity', type: 'range', label: 'Sensitivity', min: 0.05, max: 0.5, step: 0.01, default: 0.16 },
-    { key: 'idle', type: 'range', label: 'Idle motion', min: 0, max: 1, step: 0.05, default: 0.5 },
   ];
 
   init(ctx) {
     this.renderer = ctx.renderer;
     this.size = ctx.size;
+    this.aspect = this.size.width / this.size.height;
     this.time = 0;
-    this.phase = 'idle'; // 'idle' | 'requesting' | 'live'
+    this.count = 60000;
+    this.spin = 0.18;
+    this.brandId = null;
+    this.branded = false;
+    this.morph = 1;
+    this.morphTarget = 1;
     this.threshold = 0.16;
+    this.phase = 'idle';
     this._maskEase = 0;
     this._calibAt = 0;
     this._frameToggle = false;
     this._lastActive = -Infinity;
-    this.brandId = 'iqos';
-    this._logoCache = {};
 
-    // Background-subtraction mask (small grid, linearly filtered on the GPU).
-    const aspect = this.size.width / this.size.height;
+    // --- rotating logo point-cloud → logoRT (grayscale density) ---
+    this.logoUniforms = {
+      uTime: { value: 0 },
+      uPixel: { value: this.size.height / 600 },
+      uSizeScale: { value: 1.6 },
+      uMorph: { value: 1 },
+    };
+    this.logoMat = new THREE.ShaderMaterial({
+      uniforms: this.logoUniforms, vertexShader: logoVertex, fragmentShader: logoFragment,
+      transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
+    });
+    this.logoCam = new THREE.PerspectiveCamera(45, this.aspect, 0.1, 100);
+    this.logoCam.position.set(0, 0, 3.2);
+    this.logoScene = new THREE.Scene();
+    this.logoScene.background = new THREE.Color('#000000');
+    this._buildCloud();
+    this.logoRT = new THREE.WebGLRenderTarget(this.size.width, this.size.height, {
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false,
+    });
+
+    // --- camera silhouette mask ---
     this.maskW = MASK_W;
-    this.maskH = Math.max(8, Math.round(MASK_W / aspect));
+    this.maskH = Math.max(8, Math.round(MASK_W / this.aspect));
     this.maskCanvas = document.createElement('canvas');
     this.maskCanvas.width = this.maskW; this.maskCanvas.height = this.maskH;
     this.maskCtx = this.maskCanvas.getContext('2d', { willReadFrequently: true });
-    this.maskCtx.fillStyle = '#000';
-    this.maskCtx.fillRect(0, 0, this.maskW, this.maskH);
+    this.maskCtx.fillStyle = '#000'; this.maskCtx.fillRect(0, 0, this.maskW, this.maskH);
     this.maskTex = new THREE.CanvasTexture(this.maskCanvas);
-    this.maskTex.minFilter = THREE.LinearFilter;
-    this.maskTex.magFilter = THREE.LinearFilter;
+    this.maskTex.minFilter = THREE.LinearFilter; this.maskTex.magFilter = THREE.LinearFilter;
     this.workCanvas = document.createElement('canvas');
     this.workCanvas.width = this.maskW; this.workCanvas.height = this.maskH;
     this.workCtx = this.workCanvas.getContext('2d', { willReadFrequently: true });
     this._bgRef = null;
-    this._prevCur = null; // previous frame, for MOVEMENT detection
-    this._smooth = new Float32Array(this.maskW * this.maskH);
-    this._blurTmp = new Float32Array(this.maskW * this.maskH);
+    this._prevCur = null;
+    const N = this.maskW * this.maskH;
+    this._smooth = new Float32Array(N);
+    this._mA = new Float32Array(N);
+    this._mB = new Float32Array(N);
     this._maskImage = this.maskCtx.createImageData(this.maskW, this.maskH);
 
-    // Live-data reactions.
-    this.pulse = new Eased(0, { max: 1, decay: 1.0, rise: 6 });   // sale/flavour surge
-    this.shimmer = new Eased(0, { max: 1, decay: 1.4, rise: 8 }); // product jolt
-    this.ripples = []; // visitor rings: { x, y, t }
+    // --- data reactions ---
+    this.pulse = new Eased(0, { max: 1, decay: 1.0, rise: 6 });
+    this.shimmer = new Eased(0, { max: 1, decay: 1.4, rise: 8 });
+    this.ripples = [];
 
-    this.uniforms = {
+    // --- compositor → renderTarget (the prism source) ---
+    this.compUniforms = {
+      uLogoTex: { value: this.logoRT.texture },
+      uMask: { value: this.maskTex },
       uTime: { value: 0 },
-      uAspect: { value: aspect },
+      uAspect: { value: this.aspect },
       uMaskOn: { value: 0 },
-      uIdle: { value: 0.5 },
       uPulse: { value: 0 },
       uShimmer: { value: 0 },
-      uMask: { value: this.maskTex },
-      uLogo: { value: null },
-      uLogoPrev: { value: null },
-      uLogoAmt: { value: 1 },
-      uTrans: { value: 0 },
-      uFront: { value: 0 },
       uRip: { value: Array.from({ length: RIP_MAX }, () => new THREE.Vector3()) },
       uRipCount: { value: 0 },
     };
-    this._buildLogo(this.brandId);
-    this.material = new THREE.ShaderMaterial({ uniforms: this.uniforms, vertexShader, fragmentShader });
-    this.scene = new THREE.Scene();
-    this.camera = new THREE.Camera();
-    this.scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.material));
+    this.compMat = new THREE.ShaderMaterial({ uniforms: this.compUniforms, vertexShader: compVertex, fragmentShader: compFragment });
+    this.compScene = new THREE.Scene();
+    this.compCam = new THREE.Camera();
+    this.compScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this.compMat));
 
     this.renderTarget = new THREE.WebGLRenderTarget(this.size.width, this.size.height, {
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, depthBuffer: false,
@@ -160,6 +198,67 @@ export class PresencePrisms extends BaseArt {
     window.addEventListener('pointerdown', this._onTap);
   }
 
+  _buildCloud() {
+    if (this.points) { this.logoScene.remove(this.points); this.geometry.dispose(); }
+    const n = this.count;
+    const pts = samplePoints(n);
+    const positions = new Float32Array(n * 3);
+    const phase = new Float32Array(n);
+    const sizes = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      positions[i * 3] = pts[i * 2] * SHAPE_SCALE;
+      positions[i * 3 + 1] = pts[i * 2 + 1] * SHAPE_SCALE;
+      const inside = sdfAt(pts[i * 2], pts[i * 2 + 1]);
+      positions[i * 3 + 2] = (Math.random() < 0.5 ? -1 : 1) * inside * 2.0 + (Math.random() - 0.5) * 0.04;
+      phase[i] = Math.random();
+      sizes[i] = 0.8 + Math.random() * 1.0;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
+    geo.setAttribute('aSize', new THREE.BufferAttribute(sizes, 1));
+    geo.setAttribute('aTarget', new THREE.BufferAttribute(positions.slice(), 3));
+    this.geometry = geo;
+    this._emblem = positions.slice();
+    this.points = new THREE.Points(geo, this.logoMat);
+    this.points.frustumCulled = false;
+    this.logoScene.add(this.points);
+    if (this.branded) { this._writeTarget(); this.morph = this.morphTarget = 1; this.logoUniforms.uMorph.value = 1; }
+  }
+
+  _writeTarget() {
+    const n = this.count;
+    const tgt = this.geometry.attributes.aTarget.array;
+    const brandPts = hasBrandSilhouette(this.brandId) ? sampleBrandPoints(this.brandId, n) : null;
+    if (brandPts) {
+      for (let i = 0; i < n; i++) {
+        tgt[i * 3] = brandPts[i * 2] * SHAPE_SCALE;
+        tgt[i * 3 + 1] = brandPts[i * 2 + 1] * SHAPE_SCALE;
+        tgt[i * 3 + 2] = (Math.random() - 0.5) * 0.22;
+      }
+    } else {
+      tgt.set(this._emblem);
+    }
+    this.geometry.attributes.aTarget.needsUpdate = true;
+  }
+
+  // Brand change = a rotating cross-morph (Key Particles style).
+  setBrand(brandId) {
+    if (brandId === this.brandId) return;
+    this.brandId = brandId;
+    this.branded = hasBrandSilhouette(brandId);
+    if (!this.geometry) return;
+    const pos = this.geometry.attributes.position, tgt = this.geometry.attributes.aTarget;
+    if (this.morph > 0) {
+      const a = pos.array, t = tgt.array, m = this.morph;
+      for (let i = 0; i < a.length; i++) a[i] += (t[i] - a[i]) * m; // bake current blend
+      pos.needsUpdate = true;
+    }
+    this._writeTarget();
+    this.morph = 0;
+    this.morphTarget = 1;
+  }
+
   async _startCamera() {
     this.phase = 'requesting';
     try {
@@ -171,9 +270,7 @@ export class PresencePrisms extends BaseArt {
       await this.video.play();
       this.phase = 'live';
       this._calibAt = this.time + 1.2;
-    } catch {
-      this.phase = 'idle';
-    }
+    } catch { this.phase = 'idle'; }
   }
 
   _drawVideo() {
@@ -184,8 +281,7 @@ export class PresencePrisms extends BaseArt {
     if (va > ma) { sh = vh; sw = vh * ma; sx = (vw - sw) / 2; sy = 0; }
     else { sw = vw; sh = vw / ma; sx = 0; sy = (vh - sh) / 2; }
     const c = this.workCtx;
-    c.save();
-    c.scale(-1, 1); // mirror (selfie)
+    c.save(); c.scale(-1, 1);
     c.drawImage(this.video, sx, sy, sw, sh, -this.maskW, 0, this.maskW, this.maskH);
     c.restore();
     return true;
@@ -196,7 +292,7 @@ export class PresencePrisms extends BaseArt {
     this._bgRef = this.workCtx.getImageData(0, 0, this.maskW, this.maskH).data.slice();
     this._smooth.fill(0);
     this._prevCur = null;
-    this._lastActive = -Infinity; // require fresh MOVEMENT to engage
+    this._lastActive = -Infinity;
   }
 
   _updateMask() {
@@ -206,88 +302,69 @@ export class PresencePrisms extends BaseArt {
     const W = this.maskW, H = this.maskH, t = this.threshold;
     let motion = 0;
     for (let i = 0, p = 0; i < sm.length; i++, p += 4) {
-      // Silhouette SHAPE: difference from the empty-scene reference.
       const diff = (Math.abs(cur[p] - bg[p]) + Math.abs(cur[p + 1] - bg[p + 1]) + Math.abs(cur[p + 2] - bg[p + 2])) / 765;
       let x = (diff - t) / 0.22; x = x < 0 ? 0 : x > 1 ? 1 : x;
-      const v = x * x * (3 - 2 * x);
-      sm[i] += (v - sm[i]) * 0.2; // temporal smoothing (organic, not jumpy)
-      // ENGAGEMENT: frame-to-frame MOVEMENT (a still person fades to idle).
+      sm[i] += (x * x * (3 - 2 * x) - sm[i]) * 0.25;
       if (prev) motion += (Math.abs(cur[p] - prev[p]) + Math.abs(cur[p + 1] - prev[p + 1]) + Math.abs(cur[p + 2] - prev[p + 2])) / 765;
     }
     this._prevCur = cur;
     const motionNorm = prev ? motion / sm.length : 0;
-    if (prev && motionNorm > 0.004) this._lastActive = this.time; // someone moved
-    // Adaptive background: when motion is low, slowly absorb the current frame
-    // into the reference, so a stale ghost (or a person who stopped moving)
-    // melts away — no stuck silhouette. Frozen during strong motion so an
-    // active person still reads.
-    if (motionNorm < 0.02) {
-      const adapt = 0.03;
-      for (let p = 0; p < bg.length; p++) bg[p] += (cur[p] - bg[p]) * adapt;
-    }
-    const blur = (src, dst) => {
+    if (prev && motionNorm > 0.004) this._lastActive = this.time;
+    if (motionNorm < 0.02) { const a = 0.03; for (let p = 0; p < bg.length; p++) bg[p] += (cur[p] - bg[p]) * a; }
+
+    // Morphological CLOSE (dilate then erode) fills interior holes so the body
+    // reads solid — no gaps in low-contrast regions like a face.
+    const max3 = (s, d) => {
       for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-        let acc = 0, cnt = 0;
+        let m = 0;
         for (let dy = -1; dy <= 1; dy++) { const yy = y + dy; if (yy < 0 || yy >= H) continue;
-          for (let dx = -1; dx <= 1; dx++) { const xx = x + dx; if (xx < 0 || xx >= W) continue; acc += src[yy * W + xx]; cnt++; } }
-        dst[y * W + x] = acc / cnt;
+          for (let dx = -1; dx <= 1; dx++) { const xx = x + dx; if (xx < 0 || xx >= W) continue; const v = s[yy * W + xx]; if (v > m) m = v; } }
+        d[y * W + x] = m;
       }
     };
-    blur(sm, this._blurTmp);
+    const min3 = (s, d) => {
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        let m = 1;
+        for (let dy = -1; dy <= 1; dy++) { const yy = y + dy; if (yy < 0 || yy >= H) continue;
+          for (let dx = -1; dx <= 1; dx++) { const xx = x + dx; if (xx < 0 || xx >= W) continue; const v = s[yy * W + xx]; if (v < m) m = v; } }
+        d[y * W + x] = m;
+      }
+    };
+    let a = this._mA, b = this._mB;
+    a.set(sm);
+    for (let k = 0; k < 5; k++) { max3(a, b); const tmp = a; a = b; b = tmp; } // dilate
+    for (let k = 0; k < 5; k++) { min3(a, b); const tmp = a; a = b; b = tmp; }  // erode
+    // light blur for soft gradients
     const out = this._maskImage.data;
-    for (let i = 0; i < this._blurTmp.length; i++) {
-      const v = Math.min(255, Math.round(this._blurTmp[i] * 255));
-      const o = i * 4; out[o] = out[o + 1] = out[o + 2] = v; out[o + 3] = 255;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      let acc = 0, cnt = 0;
+      for (let dy = -1; dy <= 1; dy++) { const yy = y + dy; if (yy < 0 || yy >= H) continue;
+        for (let dx = -1; dx <= 1; dx++) { const xx = x + dx; if (xx < 0 || xx >= W) continue; acc += a[yy * W + xx]; cnt++; } }
+      const v = Math.min(255, Math.round((acc / cnt) * 255));
+      const o = (y * W + x) * 4; out[o] = out[o + 1] = out[o + 2] = v; out[o + 3] = 255;
     }
     this.maskCtx.putImageData(this._maskImage, 0, 0);
     this.maskTex.needsUpdate = true;
   }
 
-  // The idle logo height-field for a brand (iqos → emblem). Cached per brand,
-  // fitted to the frame aspect; read via the alpha channel in the shader.
-  _buildLogo(brandId) {
-    const id = brandId === 'zyn' || brandId === 'veev' ? brandId : null; // iqos → emblem
-    const key = id || 'iqos';
-    if (!this._logoCache[key]) {
-      const aspect = this.size.width / this.size.height;
-      const W = 256, H = Math.max(8, Math.round(256 / aspect));
-      const c = document.createElement('canvas');
-      c.width = W; c.height = H;
-      drawBrandGlyph(c.getContext('2d'), W, H, id);
-      const tex = new THREE.CanvasTexture(c);
-      tex.minFilter = THREE.LinearFilter;
-      tex.magFilter = THREE.LinearFilter;
-      this._logoCache[key] = tex;
-    }
-    if (this.uniforms) this.uniforms.uLogo.value = this._logoCache[key];
-  }
-
-  // No presence → show this brand's logo (Stage passes the active brand).
-  setBrand(brandId) {
-    this.brandId = brandId;
-    this._buildLogo(brandId);
-    if (this.uniforms) this.uniforms.uLogoPrev.value = this.uniforms.uLogo.value; // no cross-fade
-  }
-
-  // Smooth brand change: ripple from the centre that swaps colour + logo behind it.
-  beginBrandTransition(brandId) {
-    if (!this.uniforms) { this.setBrand(brandId); return; }
-    this.uniforms.uLogoPrev.value = this.uniforms.uLogo.value; // current logo = "from"
-    this.brandId = brandId;
-    this._buildLogo(brandId); // uLogo = "to"
-    this.uniforms.uTrans.value = 1;
-    this.uniforms.uFront.value = 0;
-    this._tBrand = 0;
-  }
-
   setParams(p) {
     if (p.sensitivity != null) this.threshold = p.sensitivity;
-    if (p.idle != null) this.uniforms.uIdle.value = p.idle;
+    if (p.spin != null) this.spin = p.spin;
+    if (p.size != null) this.logoUniforms.uSizeScale.value = p.size;
+    if (p.count != null && (p.count | 0) !== this.count) { this.count = p.count | 0; this._buildCloud(); }
   }
 
-  // Live data reactions, chosen to read on a rising prism wall:
-  //   visitor → a ripple ring rolls out · sale/flavour → the wall surges up
-  //   (toward the secondary colour) · product → a shimmer jolts the prisms.
+  resize(size) {
+    this.size = size;
+    this.aspect = size.width / size.height;
+    this.logoCam.aspect = this.aspect;
+    this.logoCam.updateProjectionMatrix();
+    this.logoUniforms.uPixel.value = size.height / 600;
+    this.compUniforms.uAspect.value = this.aspect;
+    this.logoRT.setSize(size.width, size.height);
+    this.renderTarget.setSize(size.width, size.height);
+  }
+
   onEvent(event) {
     switch (event.type) {
       case EventTypes.VISITOR_ENTERED:
@@ -304,60 +381,43 @@ export class PresencePrisms extends BaseArt {
     }
   }
 
-  resize(size) {
-    this.size = size;
-    this.uniforms.uAspect.value = size.width / size.height;
-    this.renderTarget.setSize(size.width, size.height);
-    // Rebuild the logo at the new frame aspect (cache is aspect-specific).
-    Object.values(this._logoCache).forEach((t) => t.dispose());
-    this._logoCache = {};
-    this._buildLogo(this.brandId);
-  }
-
   update(dt) {
     this.time += dt;
+
+    // Rotate + morph the logo cloud, render to logoRT.
+    this.morph += (this.morphTarget - this.morph) * Math.min(1, dt * 2.2);
+    this.points.rotation.y += dt * this.spin;
+    this.points.rotation.y %= Math.PI * 2;
+    this.logoUniforms.uTime.value = this.time;
+    this.logoUniforms.uMorph.value = this.morph;
+    this.renderer.setRenderTarget(this.logoRT);
+    this.renderer.render(this.logoScene, this.logoCam);
+
+    // Camera mask + movement-gated engagement.
     if (this._calibAt && this.time >= this._calibAt) { this._calibrate(); this._calibAt = 0; }
     this._frameToggle = !this._frameToggle;
     if (this.phase === 'live' && this._frameToggle) this._updateMask();
-    // Presence engages while someone is there; releases ~5s after the last action.
-    // Engage the silhouette only while there's recent MOVEMENT; it fades ~1.5s
-    // after motion stops. After 6s of stillness the LOGO blooms in to full
-    // glory (and it's the default whenever the camera is off).
-    const idleTime = this.time - this._lastActive;
-    const engaged = this.phase === 'live' && this._bgRef && idleTime < 1.5;
+    const engaged = this.phase === 'live' && this._bgRef && (this.time - this._lastActive) < 1.5;
     this._maskEase += ((engaged ? 1 : 0) - this._maskEase) * Math.min(1, dt * 2.2);
-    this.uniforms.uMaskOn.value = this._maskEase;
-    this.uniforms.uLogoAmt.value = THREE.MathUtils.smoothstep(idleTime, 6, 8.5);
 
-    // Advance an in-flight brand-change ripple (centre → edges), then finalise.
-    if (this._tBrand != null) {
-      this._tBrand = Math.min(1, this._tBrand + dt / 1.6);
-      const e = this._tBrand * this._tBrand * (3 - 2 * this._tBrand);
-      const maxR = 0.5 * Math.hypot(this.uniforms.uAspect.value, 1) + 0.1;
-      this.uniforms.uFront.value = e * maxR;
-      if (this._tBrand >= 1) {
-        this._tBrand = null;
-        this.uniforms.uTrans.value = 0;
-        this.uniforms.uLogoPrev.value = this.uniforms.uLogo.value;
-      }
-    }
-
-    // Advance visitor ripples (≈1.6s life) and publish to the shader.
+    // Advance ripples + reactions.
     for (let i = this.ripples.length - 1; i >= 0; i--) {
       this.ripples[i].t += dt / 1.6;
       if (this.ripples[i].t >= 1) this.ripples.splice(i, 1);
     }
     for (let i = 0; i < RIP_MAX; i++) {
       const r = this.ripples[i];
-      this.uniforms.uRip.value[i].set(r ? r.x : 0, r ? r.y : 0, r ? r.t : 1);
+      this.compUniforms.uRip.value[i].set(r ? r.x : 0, r ? r.y : 0, r ? r.t : 1);
     }
-    this.uniforms.uRipCount.value = this.ripples.length;
-    this.uniforms.uPulse.value = this.pulse.update(dt);
-    this.uniforms.uShimmer.value = this.shimmer.update(dt);
-    this.uniforms.uTime.value = this.time;
+    this.compUniforms.uRipCount.value = this.ripples.length;
+    this.compUniforms.uMaskOn.value = this._maskEase;
+    this.compUniforms.uPulse.value = this.pulse.update(dt);
+    this.compUniforms.uShimmer.value = this.shimmer.update(dt);
+    this.compUniforms.uTime.value = this.time;
 
+    // Composite → the prism height field.
     this.renderer.setRenderTarget(this.renderTarget);
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.compScene, this.compCam);
     this.renderer.setRenderTarget(null);
   }
 
@@ -368,8 +428,10 @@ export class PresencePrisms extends BaseArt {
     if (this.stream) this.stream.getTracks().forEach((tr) => tr.stop());
     if (this.video) this.video.srcObject = null;
     this.maskTex.dispose();
-    Object.values(this._logoCache).forEach((t) => t.dispose());
-    this.material.dispose();
+    this.geometry.dispose();
+    this.logoMat.dispose();
+    this.compMat.dispose();
+    this.logoRT.dispose();
     this.renderTarget.dispose();
   }
 }

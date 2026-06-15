@@ -204,6 +204,18 @@ export class PrismTarget {
     this._tRamp = null;
   }
 
+  /** Smoothly lerp the rise ramp to (loB,hiB) over `dur` (uniform, no ripple). */
+  crossfadeRamp(loB, hiB, dur = 1.2) {
+    const u = this.material.uniforms;
+    u.uRamp.value = 1;
+    u.uTrans.value = 0;
+    this._fadeFrom = [u.uRampLo.value.clone(), u.uRampHi.value.clone()];
+    this._fadeTo = [new THREE.Color(loB), new THREE.Color(hiB)];
+    this._tFade = 0;
+    this._tFadeDur = dur;
+    this._tRamp = null; // cancel any ripple
+  }
+
   /** Cross-fade the rise ramp from (loA,hiA) → (loB,hiB) via a ripple from centre. */
   beginRampTransition(loA, hiA, loB, hiB, dur = 1.6) {
     const u = this.material.uniforms;
@@ -225,6 +237,15 @@ export class PrismTarget {
 
   // Called each frame by the Stage: ease the buffer toward the current artwork.
   update(renderer, dt) {
+    // Advance a uniform ramp cross-fade (used for brand morphs).
+    if (this._tFade != null) {
+      this._tFade = Math.min(1, this._tFade + dt / this._tFadeDur);
+      const e = this._tFade * this._tFade * (3 - 2 * this._tFade);
+      const u = this.material.uniforms;
+      u.uRampLo.value.copy(this._fadeFrom[0]).lerp(this._fadeTo[0], e);
+      u.uRampHi.value.copy(this._fadeFrom[1]).lerp(this._fadeTo[1], e);
+      if (this._tFade >= 1) this._tFade = null;
+    }
     // Advance an in-flight ramp ripple (centre → edges), then finalise.
     if (this._tRamp != null) {
       this._tRamp = Math.min(1, this._tRamp + dt / this._tRampDur);

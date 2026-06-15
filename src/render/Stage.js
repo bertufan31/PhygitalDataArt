@@ -156,14 +156,12 @@ export class Stage {
     this._brandColors = brandColorParams(getBrand(this.state.brands, brandId));
     const ArtClass = getArt(this.state.artId);
     this._applyGradeTheme(ArtClass);
-    // Prism-ramp arts (Presence Prisms) get a smooth ripple transition that
-    // wipes colour + logo from the centre out; everything else changes instantly.
-    if (ArtClass?.prismRamp && prevId !== brandId && this.art?.beginBrandTransition &&
-        this.target?.beginRampTransition && this.state.targetId === 'prism') {
-      const op = getBrand(this.state.brands, prevId).palette;
+    // Prism-ramp arts (Presence Prisms) morph the logo + cross-fade the colour
+    // spectrum smoothly; everything else changes instantly.
+    if (ArtClass?.prismRamp && prevId !== brandId && this.target?.crossfadeRamp && this.state.targetId === 'prism') {
       const np = getBrand(this.state.brands, brandId).palette;
-      this.target.beginRampTransition(op.background, op.primary, np.background, np.primary);
-      this.art.beginBrandTransition(brandId);
+      this.target.crossfadeRamp(np.background, np.primary);
+      if (this.art) this.art.setBrand(brandId, getBrand(this.state.brands, brandId)); // rotating cross-morph
     } else {
       if (this.art) {
         const themeId = this._themeBrandId(ArtClass);
