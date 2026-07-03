@@ -8,7 +8,7 @@
 import { CommandTypes, makeCommand } from '../core/events.js';
 import { listArts } from '../art/registry.js';
 
-const VIEWS = [['head-on', 'Head-on'], ['store', 'Store'], ['angled', 'Angled']];
+const VIEWS = [['head-on', 'Head-on'], ['angled', 'Angled'], ['store', 'Store'], ['store2', 'Store 2']];
 const TARGETS = [['flat', 'Flat'], ['prism', 'Prism']];
 
 export function initHamburger({ state, dispatch }) {

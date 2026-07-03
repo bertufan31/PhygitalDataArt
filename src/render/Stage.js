@@ -16,7 +16,7 @@ import { mergedArtParams } from '../art/params.js';
 import { FlatTarget, FRAME_HEIGHT } from './targets/FlatTarget.js';
 import { PrismTarget } from './targets/PrismTarget.js';
 import { ColorGrade } from './ColorGrade.js';
-import { PhotoView } from './PhotoView.js';
+import { PhotoView, STORE_PHOTO_VIEWS } from './PhotoView.js';
 import { ViewManager } from './views/viewManager.js';
 import { getBrand, brandColorParams } from '../core/brands.js';
 
@@ -41,8 +41,12 @@ export class Stage {
 
     this._artSize = this._computeArtSize(state.frame);
     this.grade = new ColorGrade(this._artSize);
-    this.photoView = new PhotoView(); // View 2 store-photo composite
-    this.photoView.setArtTexture(this.grade.texture);
+    // Store-photo composites (Views 3 & 4), keyed by viewId.
+    this.photoViews = {};
+    for (const [id, cfg] of Object.entries(STORE_PHOTO_VIEWS)) {
+      this.photoViews[id] = new PhotoView(cfg);
+      this.photoViews[id].setArtTexture(this.grade.texture);
+    }
 
     // For the store mockup we capture the active display TARGET (flat plane or
     // 3D prism wall) front-on into this buffer, then map it onto the niche — so
@@ -271,7 +275,7 @@ export class Stage {
     const h = this.canvas.clientHeight || window.innerHeight;
     this.renderer.setSize(w, h, false);
     this.views.resize(w, h);
-    this.photoView.layout(w / h);
+    for (const pv of Object.values(this.photoViews)) pv.layout(w / h);
   }
 
   start() {
@@ -282,17 +286,18 @@ export class Stage {
         this.art.update(dt); // renders art into its own target
         this.grade.render(this.renderer); // re-theme into the graded target
       }
-      if (this.state.viewId === 'store') {
+      const pv = this.photoViews[this.state.viewId];
+      if (pv) {
         // Show the active target inside the niche: the 3D prism wall is captured
         // front-on; the flat screen is just the graded art texture.
         if (this.state.targetId === 'prism' && this.target) {
           if (this.target.update) this.target.update(this.renderer, dt); // prism easing
           this._captureTargetToNiche();
-          this.photoView.setArtTexture(this.nicheRT.texture);
+          pv.setArtTexture(this.nicheRT.texture);
         } else {
-          this.photoView.setArtTexture(this.grade.texture);
+          pv.setArtTexture(this.grade.texture);
         }
-        this.photoView.render(this.renderer); // store-photo composite
+        pv.render(this.renderer); // store-photo composite
       } else {
         if (this.target && this.target.update) this.target.update(this.renderer, dt); // prism easing
         this.views.update(dt);

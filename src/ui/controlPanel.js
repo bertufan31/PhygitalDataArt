@@ -17,8 +17,9 @@ import { el, section, subGroup } from './dom.js';
 
 const VIEWS = [
   ['head-on', 'View 1 · Head-on'],
-  ['store', 'View 2 · Store'],
-  ['angled', 'View 3 · Angled'],
+  ['angled', 'View 2 · Angled'],
+  ['store', 'View 3 · Store'],
+  ['store2', 'View 4 · Store view 2'],
 ];
 const TARGETS = [
   ['flat', 'Flat screen'],
