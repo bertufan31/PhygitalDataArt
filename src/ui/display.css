@@ -112,3 +112,92 @@ body {
 .pda-ham__link:hover {
   text-decoration: underline;
 }
+
+/* --- Collective Canvas toolbar ------------------------------------------ */
+.pda-paint {
+  position: fixed;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 16px;
+  background: rgba(10, 11, 16, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  z-index: 20;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  max-width: 96vw;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.pda-paint__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pda-paint__label {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8b90a3;
+  margin-right: 2px;
+}
+.pda-paint__swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  padding: 0;
+}
+.pda-paint__swatch.active {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.35);
+}
+.pda-paint__brush,
+.pda-paint__stampbtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: #171a24;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 0;
+}
+.pda-paint__brush span {
+  display: block;
+  border-radius: 50%;
+  background: #e7e9f0;
+}
+.pda-paint__brush.active,
+.pda-paint__stampbtn.active {
+  border-color: #5fd0ff;
+  box-shadow: 0 0 0 1px #5fd0ff;
+}
+.pda-paint__share {
+  padding: 7px 12px;
+  font-size: 12px;
+  color: #5fd0ff;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  cursor: pointer;
+}
+.pda-paint__share:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.pda-paint__status {
+  font-size: 11px;
+  color: #8b90a3;
+  white-space: nowrap;
+}
+.pda-paint__status[data-state="live"] {
+  color: #58d68d;
+}

@@ -71,17 +71,34 @@ export class Stage {
     window.addEventListener('resize', () => this.resize());
   }
 
-  // Forward pointer/touch on the canvas to the active art (in NDC). Used by the
-  // touch-interaction concept; arts that ignore it are unaffected.
+  // Forward pointer/touch on the canvas to the active art: NDC plus, when the
+  // pointer ray hits the artwork plane (z=0), the exact ART-SURFACE UV — so
+  // painting/touch lands precisely under the cursor in the 3D views.
   _initPointer() {
     this.canvas.style.touchAction = 'none';
     this._px = 0; this._py = 0; this._pointerDown = false;
+    this._ray = new THREE.Raycaster();
+    this._rayPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+    this._rayHit = new THREE.Vector3();
+    this._rayNdc = new THREE.Vector2();
     const ndc = (e) => {
       const r = this.canvas.getBoundingClientRect();
       this._px = ((e.clientX - r.left) / r.width) * 2 - 1;
       this._py = -(((e.clientY - r.top) / r.height) * 2 - 1);
     };
-    const send = () => this.art && this.art.setPointer(this._px, this._py, this._pointerDown);
+    const send = () => {
+      if (!this.art) return;
+      let u, v;
+      this._rayNdc.set(this._px, this._py);
+      this._ray.setFromCamera(this._rayNdc, this.views.camera);
+      if (this._ray.ray.intersectPlane(this._rayPlane, this._rayHit)) {
+        const halfH = FRAME_HEIGHT / 2;
+        const halfW = halfH * this._frameAspect();
+        u = (this._rayHit.x / halfW + 1) / 2;
+        v = (this._rayHit.y / halfH + 1) / 2;
+      }
+      this.art.setPointer(this._px, this._py, this._pointerDown, u, v);
+    };
     this.canvas.addEventListener('pointerdown', (e) => { this._pointerDown = true; ndc(e); send(); });
     this.canvas.addEventListener('pointermove', (e) => { ndc(e); if (this._pointerDown) send(); });
     const release = () => { this._pointerDown = false; send(); };

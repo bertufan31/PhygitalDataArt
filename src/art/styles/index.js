@@ -11,6 +11,7 @@ import './pigmentPlumes.js';
 import './keyParticles.js';
 import './slipstream.js';
 import './vitrine.js';
+import './collectiveCanvas.js';
 import './storePulse.js';
 import './presenceField.js';
 import './presencePrisms.js';

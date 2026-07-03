@@ -24,6 +24,7 @@ const COLOR_DEFAULTS = {
   'store-pulse': ['#0a1626', '#7fd8ff', '#04070c'],
   'vitrine': ['#0a0e14', '#cfd6dd', '#0a0e14'],
   'presence-prisms': ['#000000', '#ffffff', '#000000'], // height field; bg black, colours via prism ramp
+  'collective-canvas': ['#0b0b0b', '#ffffff', '#0b0b0b'],
 };
 
 // Default recolour amount per art (how strongly the duotone applies).
@@ -36,6 +37,7 @@ const AMOUNT_DEFAULTS = {
   'store-pulse': 0, // the heatmap ramp (blue→red) IS the data — keep true colours
   'vitrine': 0, // physically-lit materials — never duotone a realistic scene
   'presence-prisms': 0, // raw height field for the prism wall (coloured by the rise ramp)
+  'collective-canvas': 0, // the painted colours ARE the artwork
 };
 
 export function colorDefaults(artId) {

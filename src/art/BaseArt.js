@@ -41,8 +41,10 @@ export class BaseArt {
    * @param {string} _brandId  @param {object} [_brand] full CMS record (palette, textures, …) */
   setBrand(_brandId, _brand) {}
 
-  /** Optional: pointer/touch moved. x,y in NDC (-1..1); active toggles interaction. */
-  setPointer(_x, _y, _active) {}
+  /** Optional: pointer/touch moved. x,y in NDC (-1..1); active toggles interaction.
+   * u,v (0..1, y up) are the exact artwork-surface coords when the pointer ray
+   * hits the display plane — used by paint/touch arts. */
+  setPointer(_x, _y, _active, _u, _v) {}
 
   /** Advance + render into the internal render target. @param {number} _dt seconds */
   update(_dt) {}
