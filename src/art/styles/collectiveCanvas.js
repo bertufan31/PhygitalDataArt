@@ -36,6 +36,13 @@ const ROOM_KEY = 'pda-collective-room-v1';
 const JSONBLOB = 'https://jsonblob.com/api/jsonBlob';
 const POLL_MS = 4000;
 
+// THE GLOBAL ROOM. When set, every viewer joins this shared store by default —
+// no room creation, no share-hash needed. Point it at a JSON endpoint that
+// supports GET + PUT of a {"strokes": []} document, e.g. a Firebase Realtime
+// Database REST path: 'https://<your-db>.firebasedatabase.app/collective.json'
+// (rules read/write true). Overridable per-link via #canvas=<url>.
+const DEFAULT_ROOM = '';
+
 const BRAND_SWATCHES = [
   { name: 'IQOS', color: '#00D1D2' },
   { name: 'ZYN', color: '#00A9E0' },
@@ -237,7 +244,9 @@ export class CollectiveCanvas extends BaseArt {
   }
 
   async _startSync() {
-    this.room = this._roomFromHash() || localStorage.getItem(ROOM_KEY) || null;
+    // Precedence: explicit share-link > the baked-in global room > a room this
+    // browser used before > create a fresh one.
+    this.room = this._roomFromHash() || DEFAULT_ROOM || localStorage.getItem(ROOM_KEY) || null;
     if (this.room) localStorage.setItem(ROOM_KEY, this.room);
     this._status = this.room ? 'joining' : 'local';
     this._renderStatus();
