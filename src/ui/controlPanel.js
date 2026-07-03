@@ -276,7 +276,19 @@ export function initControlPanel({ root, state, dispatch, fire }) {
     colourBody.replaceChildren(...colorParamDefs().map((def) => makeParamField(def, params[def.key], state.artId)));
     const defs = (ArtClass && ArtClass.params) || [];
     artSettingsBody.replaceChildren(...defs.map((def) => makeParamField(def, params[def.key], state.artId)));
-    artSettingsSection.style.display = defs.length ? '' : 'none';
+    // The shared canvas gets a wipe control (clears it for EVERY device).
+    if (state.artId === 'collective-canvas') {
+      artSettingsBody.append(el('button', {
+        class: 'opt opt--wide opt--danger',
+        text: 'Clear shared canvas',
+        onclick: () => {
+          if (window.confirm('Clear the shared canvas for everyone? This cannot be undone.')) {
+            dispatch(makeCommand(CommandTypes.CLEAR_CANVAS, {}));
+          }
+        },
+      }));
+    }
+    artSettingsSection.style.display = defs.length || state.artId === 'collective-canvas' ? '' : 'none';
   }
 
   // -- Live feed ---------------------------------------------------------

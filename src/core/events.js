@@ -34,6 +34,7 @@ export const CommandTypes = {
   SET_BRAND: 'set_brand', // edit one brand's fields (palette, principles, …) in the CMS
   SET_ACTIVE_BRAND: 'set_active_brand', // which brand is currently in focus
   SET_BRAND_CYCLE: 'set_brand_cycle', // auto brand rotation on/off (+ period), like SET_SIM
+  CLEAR_CANVAS: 'clear_canvas', // wipe the shared Collective Canvas (bumps its generation)
   REQUEST_STATE: 'request_state', // a window asks the running display for current state
   SYNC_STATE: 'sync_state', // the display replies with a full state snapshot
 };

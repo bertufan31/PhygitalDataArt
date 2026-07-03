@@ -86,6 +86,9 @@ function init() {
       case CommandTypes.SET_BRAND_CYCLE:
         syncBrandCycle();
         break;
+      case CommandTypes.CLEAR_CANVAS:
+        stage.clearSharedCanvas();
+        break;
       case CommandTypes.SET_SIM:
         sim.setRate(state.sim.rate);
         if (state.sim.running) sim.start(state.sim.rate);

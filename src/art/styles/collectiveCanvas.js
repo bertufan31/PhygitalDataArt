@@ -78,7 +78,9 @@ export class CollectiveCanvas extends BaseArt {
     this.color = BRAND_SWATCHES[0].color;
     this.brush = BRUSHES[1].w;
     this.tool = 'brush'; // 'brush' | 'stamp:<id>'
-    this.strokes = this._loadLocal();
+    const saved = this._loadLocal();
+    this.strokes = saved.strokes;
+    this.gen = saved.gen; // canvas GENERATION — a clear bumps it; higher gen wins
     this._live = null; // in-progress stroke
     this._dirtyRemote = false;
     this._status = 'local'; // 'local' | 'live' | 'joining'
@@ -91,10 +93,27 @@ export class CollectiveCanvas extends BaseArt {
 
   // --- local persistence --------------------------------------------------
   _loadLocal() {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch { return []; }
+    try {
+      const d = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (Array.isArray(d)) return { gen: 0, strokes: d }; // migrate old shape
+      return { gen: d?.gen || 0, strokes: d?.strokes || [] };
+    } catch { return { gen: 0, strokes: [] }; }
   }
   _saveLocal() {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(this.strokes)); } catch { /* full/blocked */ }
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ gen: this.gen, strokes: this.strokes })); } catch { /* full/blocked */ }
+  }
+
+  /** Wipe the shared canvas for EVERYONE: bump the generation and push it.
+   * Clients that see a newer generation discard their local strokes, so no
+   * device re-seeds the old drawing. */
+  clearShared() {
+    this.gen = (this.gen || 0) + 1;
+    this.strokes = [];
+    this._live = null;
+    this._saveLocal();
+    this._redraw();
+    this._dirtyRemote = true;
+    this._pushSoon();
   }
 
   // --- drawing --------------------------------------------------------------
@@ -206,7 +225,7 @@ export class CollectiveCanvas extends BaseArt {
   }
 
   async _createRoom() {
-    const payload = JSON.stringify({ strokes: this.strokes });
+    const payload = JSON.stringify({ gen: this.gen || 0, strokes: this.strokes });
     const providers = [
       async () => { // extendsclass — id in the response body
         const r = await fetch('https://json.extendsclass.com/bin', {
@@ -268,24 +287,33 @@ export class CollectiveCanvas extends BaseArt {
     try {
       const res = await fetch(url, { headers: { Accept: 'application/json' } });
       if (!res.ok) throw new Error(String(res.status));
-      const remote = (await res.json())?.strokes || [];
-      const have = new Set(this.strokes.map((s) => s.id));
-      const theirs = new Set(remote.map((s) => s.id));
-      const newOnes = remote.filter((s) => !have.has(s.id));
-      const missing = this.strokes.filter((s) => !theirs.has(s.id));
-      if (newOnes.length) {
-        this.strokes = this.strokes.concat(newOnes);
+      const doc = (await res.json()) || {};
+      const remote = Array.isArray(doc) ? doc : doc.strokes || [];
+      const remoteGen = Array.isArray(doc) ? 0 : doc.gen || 0;
+      if (remoteGen > (this.gen || 0)) {
+        // The canvas was CLEARED (or reset) — a newer generation replaces
+        // everything local, so old strokes never get re-seeded.
+        this.gen = remoteGen;
+        this.strokes = remote.slice();
         this._saveLocal();
         this._redraw();
-      }
-      if (missing.length || this._dirtyRemote) {
-        const merged = remote.concat(missing.length ? this.strokes.filter((s) => !theirs.has(s.id)) : []);
-        await fetch(url, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ strokes: missing.length ? merged : this.strokes }),
-        });
-        this._dirtyRemote = false;
+      } else if (remoteGen < (this.gen || 0)) {
+        // Our clear hasn't landed (or was raced) — re-assert it.
+        await this._put(url, this.strokes);
+      } else {
+        const have = new Set(this.strokes.map((s) => s.id));
+        const theirs = new Set(remote.map((s) => s.id));
+        const newOnes = remote.filter((s) => !have.has(s.id));
+        const missing = this.strokes.filter((s) => !theirs.has(s.id));
+        if (newOnes.length) {
+          this.strokes = this.strokes.concat(newOnes);
+          this._saveLocal();
+          this._redraw();
+        }
+        if (missing.length || this._dirtyRemote) {
+          await this._put(url, remote.concat(this.strokes.filter((s) => !theirs.has(s.id))));
+          this._dirtyRemote = false;
+        }
       }
       this._status = 'live';
       this._lastErr = '';
@@ -295,6 +323,14 @@ export class CollectiveCanvas extends BaseArt {
     }
     this._syncing = false;
     this._renderStatus();
+  }
+
+  _put(url, strokes) {
+    return fetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ gen: this.gen || 0, strokes }),
+    });
   }
 
   _pushSoon() {

@@ -283,6 +283,11 @@ export class Stage {
     this.art.setParams(params);
   }
 
+  /** Wipe the shared Collective Canvas (no-op for other arts). */
+  clearSharedCanvas() {
+    if (this.art && typeof this.art.clearShared === 'function') this.art.clearShared();
+  }
+
   onEvent(event) {
     if (this.art) this.art.onEvent(event);
   }
