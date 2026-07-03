@@ -107,24 +107,27 @@ export function initBrandPanel({ root, state, dispatch }) {
   // Multiple uploads per category; images are downscaled to ≤512px data-URLs so
   // they persist in localStorage and sync over the bus like everything else.
   const MAX_TEX = 8;
-  const downscale = (file) => new Promise((resolve, reject) => {
+  const readAsDataUrl = (file) => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onerror = reject;
-    reader.onload = () => {
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        const k = Math.min(1, 512 / Math.max(img.width, img.height));
-        const c = document.createElement('canvas');
-        c.width = Math.max(1, Math.round(img.width * k));
-        c.height = Math.max(1, Math.round(img.height * k));
-        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
-        resolve(c.toDataURL('image/jpeg', 0.85));
-      };
-      img.src = reader.result;
-    };
+    reader.onload = () => resolve(reader.result);
     reader.readAsDataURL(file);
   });
+  const downscale = (file, max = 512, fill = null) => readAsDataUrl(file).then((src) => new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = reject;
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.max(1, Math.round(img.width * k));
+      c.height = Math.max(1, Math.round(img.height * k));
+      const ctx = c.getContext('2d');
+      if (fill) { ctx.fillStyle = fill; ctx.fillRect(0, 0, c.width, c.height); } // flatten alpha
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+      resolve(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.src = src;
+  }));
 
   function texGroup(label, cat, brand) {
     const items = brand.textures?.[cat] || [];
@@ -172,11 +175,51 @@ export function initBrandPanel({ root, state, dispatch }) {
     ]));
   }
 
+  // -- Background image (behind brand-themed arts) -------------------------
+  // One per brand. SVGs are stored AS-IS (vector — stays sharp at any display
+  // size and its true colours are preserved on screen); raster images are
+  // capped to ≤1600px, flattened onto the brand background colour.
+  function backgroundSection(brand) {
+    const stack = el('div', { class: 'stack' }, [
+      el('p', {
+        class: 'fx-note',
+        text: 'Shown behind brand-themed artworks (Key Particles) in the brand’s true colours. SVG recommended — stored as vector.',
+      }),
+    ]);
+    if (brand.bgImage) {
+      stack.append(
+        el('div', { class: 'bg-preview' }, [el('img', { src: brand.bgImage, alt: `${brand.label} background` })]),
+        el('button', {
+          class: 'opt', text: 'Remove background',
+          onclick: () => { patchBrand({ bgImage: null }); rebuildEditor(); },
+        }),
+      );
+    }
+    stack.append(el('input', {
+      type: 'file', accept: 'image/svg+xml,image/*', class: 'tex-input',
+      onchange: async (e) => {
+        const f = e.target.files[0];
+        if (f) {
+          try {
+            const src = f.type === 'image/svg+xml'
+              ? await readAsDataUrl(f)
+              : await downscale(f, 1600, active().palette.background || '#000');
+            patchBrand({ bgImage: src });
+            rebuildEditor();
+          } catch { /* unreadable file — keep the current background */ }
+        }
+        e.target.value = '';
+      },
+    }));
+    return section('Background', stack);
+  }
+
   let lastBrandId = null;
   function rebuildEditor() {
     const brand = active();
     editor.replaceChildren(
       paletteSection(brand),
+      backgroundSection(brand),
       logosSection(brand),
       texturesSection(brand),
       imagerySection(brand),

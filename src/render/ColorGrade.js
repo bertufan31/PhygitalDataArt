@@ -18,6 +18,9 @@ const fragmentShader = /* glsl */ `
   precision highp float;
   varying vec2 vUv;
   uniform sampler2D uSrc;
+  uniform sampler2D uBg;
+  uniform float uHasBg;
+  uniform vec2 uBgFit;
   uniform vec3 uColorA;
   uniform vec3 uColorB;
   uniform vec3 uColorBg;
@@ -33,9 +36,13 @@ const fragmentShader = /* glsl */ `
     vec3 duo = mix(uColorA, uColorB, smoothstep(0.0, 1.0, l)) * (0.35 + 0.95 * l);
     vec3 themed = mix(duo, src, clamp(sat * 1.7, 0.0, 1.0));
     vec3 art = mix(src, themed, clamp(uAmount, 0.0, 1.0));
-    // Composite over the editable background colour (shows through dark areas).
+    // Composite over the editable background (shows through dark areas):
+    // the flat colour, or the brand's CMS background image (cover-fitted)
+    // which deliberately BYPASSES the duotone so it keeps its true colours.
+    vec3 bg = uColorBg;
+    if (uHasBg > 0.5) bg = texture2D(uBg, (vUv - 0.5) * uBgFit + 0.5).rgb;
     float coverage = smoothstep(0.02, 0.35, l);
-    gl_FragColor = vec4(mix(uColorBg, art, coverage), 1.0);
+    gl_FragColor = vec4(mix(bg, art, coverage), 1.0);
   }
 `;
 
@@ -45,6 +52,9 @@ export class ColorGrade {
     this.camera = new THREE.Camera();
     this.uniforms = {
       uSrc: { value: null },
+      uBg: { value: null },
+      uHasBg: { value: 0 },
+      uBgFit: { value: new THREE.Vector2(1, 1) },
       uColorA: { value: new THREE.Color('#0a0f1e') },
       uColorB: { value: new THREE.Color('#7fbfff') },
       uColorBg: { value: new THREE.Color('#05060a') },
@@ -74,8 +84,24 @@ export class ColorGrade {
     if (colorAmount != null) this.uniforms.uAmount.value = colorAmount;
   }
 
+  // Brand background image behind the artwork (null clears back to the flat
+  // colour). Cover-fitted to the render aspect; the caller owns the texture.
+  setBackgroundImage(texture, aspect = 1) {
+    this.uniforms.uBg.value = texture;
+    this.uniforms.uHasBg.value = texture ? 1 : 0;
+    this._bgAspect = aspect;
+    this._updateBgFit();
+  }
+
+  _updateBgFit() {
+    const ca = this.renderTarget.width / Math.max(1, this.renderTarget.height);
+    const ia = this._bgAspect || 1;
+    this.uniforms.uBgFit.value.set(Math.min(1, ca / ia), Math.min(1, ia / ca));
+  }
+
   setSize(size) {
     this.renderTarget.setSize(size.width, size.height);
+    this._updateBgFit();
   }
 
   render(renderer) {

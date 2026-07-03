@@ -8,7 +8,7 @@
 
 import './art/styles/index.js'; // so listArts() is populated for the art buttons
 import './ui/panel.css';
-import { loadState, applyCommand } from './core/state.js';
+import { loadState, saveState, applyCommand } from './core/state.js';
 import { createBus } from './core/bus.js';
 import { CommandTypes, makeCommand } from './core/events.js';
 import { initControlPanel } from './ui/controlPanel.js';
@@ -18,9 +18,11 @@ const state = loadState();
 
 let panel;
 
-// A command both updates the local UI mirror and travels to the display.
+// A command updates the local UI mirror, persists, and travels to the display.
+// Persisting here too keeps changes made with no display window open.
 function dispatch(cmd) {
   applyCommand(state, cmd);
+  saveState(state);
   bus.send(cmd);
   panel?.refresh();
 }

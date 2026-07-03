@@ -101,6 +101,7 @@ export class KeyParticles extends BaseArt {
   static id = 'key-particles';
   static label = 'Key Particles';
   static brandTheme = true; // palette/background follow the active brand
+  static brandBgImage = true; // the brand's CMS background image shows behind the particles
   static params = [
     { key: 'count', type: 'range', label: 'Particles', min: 10000, max: 200000, step: 10000, default: 50000 },
     { key: 'size', type: 'range', label: 'Particle size', min: 0.3, max: 4, step: 0.1, default: 1 },

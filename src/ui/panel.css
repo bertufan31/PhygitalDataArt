@@ -395,6 +395,18 @@ body {
   font-size: 12px;
   color: var(--muted);
 }
+.bg-preview {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: repeating-conic-gradient(#1a1e2a 0% 25%, #232838 0% 50%) 0 0 / 16px 16px;
+}
+.bg-preview img {
+  width: 100%;
+  max-height: 150px;
+  object-fit: contain;
+  display: block;
+}
 .brand-text,
 .brand-input {
   width: 100%;

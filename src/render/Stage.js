@@ -144,6 +144,46 @@ export class Stage {
     }
   }
 
+  // The brand's CMS background image (SVG or raster data-URL) behind the art —
+  // only for arts that opt in (static brandBgImage). SVGs are rasterised large
+  // so they stay sharp; the grade shows the image in its TRUE colours.
+  _applyBrandBg(ArtClass) {
+    const src = (ArtClass?.brandBgImage && getBrand(this.state.brands, this._themeBrandId(ArtClass)).bgImage) || null;
+    if (src === this._bgSrc) return;
+    this._bgSrc = src;
+    this._bgToken = (this._bgToken || 0) + 1;
+    const token = this._bgToken;
+    const old = this._bgTex;
+    const clear = () => {
+      this.grade.setBackgroundImage(null);
+      this._bgTex = null;
+      old?.dispose();
+    };
+    if (!src) { clear(); return; }
+    const img = new Image();
+    img.onload = () => {
+      if (token !== this._bgToken) return; // a newer background superseded this load
+      let w = img.naturalWidth || 1024, h = img.naturalHeight || 1024;
+      // Vectors scale losslessly — rasterise at 2048 on the long side. Raster
+      // sources only ever scale DOWN to that cap.
+      const k = src.startsWith('data:image/svg') ? 2048 / Math.max(w, h) : Math.min(1, 2048 / Math.max(w, h));
+      w = Math.max(1, Math.round(w * k));
+      h = Math.max(1, Math.round(h * k));
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      this.grade.setBackgroundImage(tex, w / h);
+      this._bgTex = tex;
+      old?.dispose();
+    };
+    img.onerror = () => { if (token === this._bgToken) clear(); };
+    img.src = src;
+  }
+
   // Colour the prism wall by rise (brand primary→secondary) for arts that ask
   // for it; otherwise the wall uses the sampled artwork colour.
   _applyPrismRamp() {
@@ -169,6 +209,7 @@ export class Stage {
     this.state.artId = ArtClass.id;
     this.grade.setSource(this.art.texture);
     this._applyGradeTheme(ArtClass); // own palette, or brand palette for brandTheme arts
+    this._applyBrandBg(ArtClass); // brand background image (or clear a leftover)
     const themeId = this._themeBrandId(ArtClass);
     this.art.setBrand(themeId, getBrand(this.state.brands, themeId)); // morph / re-dress
     if (ArtClass.noPrism && this.state.targetId === 'prism') this.setTarget('flat');
@@ -188,6 +229,7 @@ export class Stage {
     this._brandColors = brandColorParams(getBrand(this.state.brands, brandId));
     const ArtClass = getArt(this.state.artId);
     this._applyGradeTheme(ArtClass);
+    this._applyBrandBg(ArtClass); // follow the brand's CMS background (also live edits)
     // Prism-ramp arts (Presence Prisms) morph the logo + cross-fade the colour
     // spectrum smoothly; everything else changes instantly.
     if (ArtClass?.prismRamp && prevId !== brandId && this.target?.crossfadeRamp && this.state.targetId === 'prism') {

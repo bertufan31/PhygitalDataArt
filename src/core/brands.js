@@ -36,6 +36,7 @@ const SEED = {
     ],
     imagery: [],
     textures: { cubes: [], spheres: [] }, // CMS uploads for the realistic 3D piece
+    bgImage: null, // CMS background image (data URL; SVG kept as vector) for brand-themed arts
     principles: ['Warm, precise minimalism', 'Unfold the experience', 'Light treated as a material'],
     motion: { language: 'Smooth, breathing, premium', easing: 'easeInOut' },
   },
@@ -48,6 +49,7 @@ const SEED = {
     ],
     imagery: [],
     textures: { cubes: [], spheres: [] },
+    bgImage: null,
     principles: ['Crisp, clean, energetic', 'Bold cyan on deep blue'],
     motion: { language: 'Snappy, modern', easing: 'easeOut' },
   },
@@ -66,6 +68,7 @@ const SEED = {
       { id: 'v-hero', label: 'V hero shape', src: asset('veev-vshape.pdf') },
     ],
     textures: { cubes: [], spheres: [] },
+    bgImage: null,
     principles: ['Sleek, contemporary', 'The “V” as a hero motif'],
     motion: { language: 'Fluid, directional', easing: 'easeInOut' },
   },

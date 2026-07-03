@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import './ui/panel.css';
-import { loadState, applyCommand } from './core/state.js';
+import { loadState, saveState, applyCommand } from './core/state.js';
 import { createBus } from './core/bus.js';
 import { CommandTypes, makeCommand } from './core/events.js';
 import { initBrandPanel } from './ui/brandPanel.js';
@@ -17,9 +17,12 @@ const state = loadState();
 
 let panel;
 
-// A command updates the local mirror, persists, and travels to the other windows.
+// A command updates the local mirror, persists, and travels to the other
+// windows. Persisting HERE matters: without it, edits made while no display
+// window is open (the only other writer) would vanish on refresh.
 function dispatch(cmd) {
   applyCommand(state, cmd);
+  saveState(state);
   bus.send(cmd);
   panel?.refresh();
 }
