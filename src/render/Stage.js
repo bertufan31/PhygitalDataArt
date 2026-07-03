@@ -102,13 +102,14 @@ export class Stage {
     return (ArtClass && ArtClass.fixedBrand) || this.state.activeBrandId;
   }
 
-  // Apply the per-art grade theme: own palette if the art owns its look, else
-  // the (possibly pinned) brand palette.
+  // Apply the grade theme. Every art keeps its OWN palette (defaults + user
+  // edits) unless it explicitly opts into brand re-theming (static brandTheme —
+  // the brand-morphing pieces, where palette/background follow the brand).
   _applyGradeTheme(ArtClass) {
-    if (ArtClass.ownLook) {
-      this.grade.setColors(mergedArtParams(this.state, ArtClass.id, ArtClass));
-    } else {
+    if (ArtClass && ArtClass.brandTheme) {
       this.grade.setColors(brandColorParams(getBrand(this.state.brands, this._themeBrandId(ArtClass))));
+    } else {
+      this.grade.setColors(mergedArtParams(this.state, ArtClass.id, ArtClass));
     }
   }
 
@@ -135,8 +136,7 @@ export class Stage {
     this.art.setParams(params);
     this.state.artId = ArtClass.id;
     this.grade.setSource(this.art.texture);
-    this.grade.setColors(params);
-    this._applyGradeTheme(ArtClass); // honour fixedBrand / ownLook
+    this._applyGradeTheme(ArtClass); // own palette, or brand palette for brandTheme arts
     const themeId = this._themeBrandId(ArtClass);
     this.art.setBrand(themeId, getBrand(this.state.brands, themeId)); // morph / re-dress
     if (ArtClass.noPrism && this.state.targetId === 'prism') this.setTarget('flat');

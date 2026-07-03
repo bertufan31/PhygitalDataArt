@@ -19,3 +19,8 @@ export function el(tag, props = {}, children = []) {
 export function section(title, body) {
   return el('section', { class: 'panel-section' }, [el('h2', { text: title }), body]);
 }
+
+/** A titled sub-block inside a combined panel section. */
+export function subGroup(title, body) {
+  return el('div', { class: 'sub-group' }, [el('h3', { class: 'sub-title', text: title }), body]);
+}

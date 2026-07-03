@@ -87,6 +87,7 @@ const fragmentShader = /* glsl */ `
 export class SlicedLight extends BaseArt {
   static id = 'sliced-light';
   static label = 'Sliced Light';
+  static archived = true; // lower-priority — tucked under the Archive disclosure
 
   init(ctx) {
     this.renderer = ctx.renderer;

@@ -13,7 +13,7 @@ import { CommandTypes, EventTypes, makeCommand, makeEvent, Flavours, Products } 
 import { listArts, getArt } from '../art/registry.js';
 import { mergedArtParams, colorParamDefs } from '../art/params.js';
 import { listBrands } from '../core/brands.js';
-import { el, section } from './dom.js';
+import { el, section, subGroup } from './dom.js';
 
 const VIEWS = [
   ['head-on', 'View 1 · Head-on'],
@@ -298,12 +298,18 @@ export function initControlPanel({ root, state, dispatch, fire }) {
       section('Brand', brandBody),
       section('Colour', colourBody),
       artSettingsSection,
-      section('Mockup view', viewRow),
-      section('Display target', targetRow),
-      section('Frame style', frameRow),
-      section('Simulator', simBody),
-      section('Live data', el('div', { class: 'stack' }, [padRow, flavourNote, flavourGrid])),
-      section('Frame size', frameSizeBody),
+      // How the piece is shown: target (flat/prisms) + view + frame, together.
+      section('Art style', el('div', { class: 'stack' }, [
+        targetRow,
+        subGroup('Mockup view', viewRow),
+        subGroup('Frame style', frameRow),
+        subGroup('Frame size', frameSizeBody),
+      ])),
+      // The data feed and the manual DJ pads are one workflow — one box.
+      section('Live data', el('div', { class: 'stack' }, [
+        simBody,
+        subGroup('Manual events', el('div', { class: 'stack' }, [padRow, flavourNote, flavourGrid])),
+      ])),
       section('LED prisms', prismBody),
     ]),
     section('Live feed', feed),

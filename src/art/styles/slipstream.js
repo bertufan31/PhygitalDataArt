@@ -147,6 +147,7 @@ const fadeVertex = /* glsl */ `
 export class Slipstream extends BaseArt {
   static id = 'slipstream';
   static label = 'Slipstream';
+  static brandTheme = true; // palette/background follow the active brand
   static params = [
     { key: 'count', type: 'range', label: 'Streaks', min: 20000, max: 200000, step: 10000, default: 70000 },
     { key: 'streak', type: 'range', label: 'Streak size', min: 0.3, max: 3, step: 0.1, default: 1 },

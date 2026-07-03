@@ -89,6 +89,20 @@ body {
   gap: 12px;
 }
 
+/* Titled sub-blocks inside a combined section */
+.sub-group {
+  border-top: 1px solid var(--border);
+  padding-top: 11px;
+}
+.sub-title {
+  margin: 0 0 9px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
 /* --- Buttons ----------------------------------------------------------- */
 .btn-grid {
   display: flex;
