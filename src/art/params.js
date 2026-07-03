@@ -10,6 +10,7 @@
 // Default [primary, secondary, background] per art (shadow → highlight → ground).
 const COLOR_DEFAULTS = {
   'data-pigments': ['#0a1430', '#ffd36b', '#04060e'],
+  'data-pigments-2': ['#0a1a2f', '#00d1d2', '#04060e'],
   'liquid-light': ['#0a1a3a', '#ff9e6b', '#04060e'],
   'sliced-light': ['#04121a', '#7fe0ff', '#02060a'],
   'particle-flow': ['#101f38', '#ffb36b', '#04060e'],
@@ -27,6 +28,7 @@ const COLOR_DEFAULTS = {
 
 // Default recolour amount per art (how strongly the duotone applies).
 const AMOUNT_DEFAULTS = {
+  'data-pigments-2': 0, // colours itself from the brand palette
   'key-aura': 0, // colours itself from the 3-stop gradient
   'key-particles': 0.5,
   'key-pattern': 0.5,

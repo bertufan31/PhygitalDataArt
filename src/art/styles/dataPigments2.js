@@ -1,15 +1,22 @@
 // ---------------------------------------------------------------------------
-// Art option: "Data Pigments".
+// Art option: "Data Pigments II" — the liquid-metal field, rebuilt on-brand.
 //
-// A flowing, Anadol-flavoured liquid-light field: domain-warped fractal noise
-// rendered as luminous structure over deep black, with cinematic tone-mapping.
+// Same soul as Data Pigments (domain-warped fractal liquid + data impacts that
+// modulate the field itself), with the two complaints fixed:
 //
-// Data reactions MODULATE THE FIELD ITSELF (not coloured discs on top):
-//   visitor  → RIPPLE     a travelling wave actually ripples the pigment outward
-//   sale/flav→ BLAST      blooms + recolours the EXISTING structure (hue pulled
-//                         into the ridges), with a gentle swell
-//   product  → DISRUPTION a shockwave warps and tears the field
-// A flavour also dyes the whole field; activity builds eased "energy".
+//   • ON-BRAND COLOUR — the original coloured itself with a cycling rainbow
+//     palette; those saturated hues survive the Recolour grade by design, so it
+//     could never sit on brand. Here the liquid is coloured NATIVELY from the
+//     active brand palette (background → primary → secondary ramp), eased
+//     smoothly when the brand changes. Event colours still punch through.
+//   • NO PIXELATION — the old per-frame animated film grain (pixel crawl) is
+//     replaced with a static dither; real metallic shading (derivative normals,
+//     soft specular) replaces harsh value ridges; and the piece renders at 2×
+//     resolution (static resScale, honoured by the Stage) so it supersamples.
+//
+// Data reactions are unchanged: visitor → ripple wave through the pigment ·
+// sale/flavour → bloom that recolours the structure (+ whole-field dye) ·
+// product → a shockwave that warps and tears the field.
 // ---------------------------------------------------------------------------
 
 import * as THREE from 'three';
@@ -31,21 +38,14 @@ const fragmentShader = /* glsl */ `
   precision highp float;
   #define FX_MAX ${FX_MAX}
   varying vec2 vUv;
-  uniform float uTime, uAspect, uEnergy, uWarp, uPaletteShift, uTintAmount;
+  uniform float uTime, uAspect, uEnergy, uWarp, uSpeed, uMetal, uTintAmount;
   uniform vec3  uTint;
-  uniform vec4  uFxPos[FX_MAX];   // xy=pos(0..1), z=ageNorm, w=kind
+  uniform vec3  uCDeep, uCMid, uCHi;   // brand: background → primary → secondary
+  uniform vec4  uFxPos[FX_MAX];        // xy=pos(0..1), z=ageNorm, w=kind
   uniform vec3  uFxColor[FX_MAX];
   uniform int   uFxCount;
 
   ${NOISE_GLSL}
-
-  vec3 palette(float t){
-    vec3 a = vec3(0.5, 0.45, 0.5);
-    vec3 b = vec3(0.5, 0.5, 0.45);
-    vec3 c = vec3(1.0, 1.0, 1.0);
-    vec3 d = vec3(0.00, 0.12, 0.24);
-    return a + b * cos(6.28318 * (c * t + d));
-  }
 
   void main(){
     vec2 uv = vUv;
@@ -89,17 +89,28 @@ const fragmentShader = /* glsl */ `
     }
     fxTintAmt = clamp(fxTintAmt, 0.0, 1.0);
 
+    // --- The liquid: domain-warped fbm, as before. ---
     vec2 p = (cuv + disp) * 2.2;
-    float t = uTime * 0.06;
+    float t = uTime * 0.06 * uSpeed;
     vec2 q = vec2(fbm(p + vec2(0.0, t)), fbm(p + vec2(5.2, -t)));
     vec2 r = vec2(fbm(p + uWarp * q + vec2(1.7, 9.2) + 0.4 * t),
                   fbm(p + uWarp * q + vec2(8.3, 2.8) - 0.4 * t));
-    float v = fbm(p + uWarp * r);
-    v = v * 0.5 + 0.5;
+    float v = fbm(p + uWarp * r) * 0.5 + 0.5;
     float ridges = pow(smoothstep(0.22, 0.95, v), 1.6);
 
-    float tt = v + 0.15 * length(r) + uPaletteShift;
-    vec3 col = palette(tt) * (0.12 + 1.3 * ridges * (0.6 + 0.4 * uEnergy));
+    // --- LIQUID METAL, ON BRAND: deep near-black pools, ridges lit through the
+    //     brand palette, metallic shading from derivative normals with specular
+    //     glints only on the peaks (no rainbow). ---
+    vec3 N = normalize(vec3(-dFdx(v), -dFdy(v), 0.06));
+    vec3 L = normalize(vec3(0.42, 0.55, 0.72));
+    float diff = max(dot(N, L), 0.0);
+    float spec = pow(max(dot(N, normalize(L + vec3(0.0, 0.0, 1.0))), 0.0), 52.0);
+
+    vec3 base = mix(uCDeep * 0.45, uCMid, smoothstep(0.32, 0.82, v + 0.08 * length(r)));
+    base = mix(base, mix(uCHi, vec3(1.0), 0.25), smoothstep(0.80, 0.99, v + 0.22 * ridges));
+    vec3 col = base * (0.10 + 1.30 * ridges * (0.6 + 0.4 * uEnergy)) * (0.55 + 0.45 * diff);
+    col += mix(uCHi, vec3(1.0), 0.6) * spec * uMetal * ridges; // glints on the peaks
+
     col *= (1.0 + heat);                                       // effects intensify the real pigment
     col = mix(col, fxTint * (0.5 + 1.5 * ridges), fxTintAmt);  // hue pulled INTO the structure
     col = mix(col, uTint * (0.5 + 1.2 * ridges), uTintAmount * ridges); // flavour dye
@@ -108,26 +119,37 @@ const fragmentShader = /* glsl */ `
     col = pow(col, vec3(0.85));
     float vig = smoothstep(1.3, 0.35, length((uv - 0.5) * vec2(uAspect, 1.0)));
     col *= 0.55 + 0.45 * vig;
-    float g = fract(sin(dot(uv * vec2(uTime + 1.0, uTime + 2.0), vec2(12.9898, 78.233))) * 43758.5453);
-    col += (g - 0.5) * 0.022;
+    // Static dither (banding relief) — no animated grain, no pixel crawl.
+    float g = fract(sin(dot(uv, vec2(12.9898, 78.233))) * 43758.5453);
+    col += (g - 0.5) * 0.008;
     gl_FragColor = vec4(max(col, 0.0), 1.0);
   }
 `;
 
-export class DataPigments extends BaseArt {
-  static id = 'data-pigments';
-  static label = 'Data Pigments';
-  static archived = true; // superseded by Data Pigments II (brand-native colours)
+export class DataPigments2 extends BaseArt {
+  static id = 'data-pigments-2';
+  static label = 'Data Pigments II';
+  static resScale = 2; // supersampled — renders at 2× and downsamples (no pixelation)
+  static params = [
+    { key: 'warp', type: 'range', label: 'Warp', min: 0.6, max: 2.2, step: 0.05, default: 1.3 },
+    { key: 'speed', type: 'range', label: 'Flow speed', min: 0.2, max: 3, step: 0.1, default: 1 },
+    { key: 'metal', type: 'range', label: 'Metal', min: 0, max: 1, step: 0.05, default: 0.55 },
+  ];
 
   init(ctx) {
     this.renderer = ctx.renderer;
     this.size = ctx.size;
     this.time = 0;
-    this.paletteShift = 0;
     this.tint = new THREE.Color('#ffffff');
     this.energy = new Eased(BASE_ENERGY, { max: 3, decay: 0.6, rise: 2.0 });
     this.tintAmount = new Eased(0, { max: 0.85, decay: 0.35, rise: 2.5 });
     this.fx = new EffectField(FX_MAX);
+    this.warp = 1.3;
+    // Brand palette targets (eased toward on brand change). IQOS-ish defaults
+    // until the Stage hands us the active brand.
+    this._toDeep = new THREE.Color('#0a1a2f');
+    this._toMid = new THREE.Color('#00d1d2');
+    this._toHi = new THREE.Color('#ffffff');
 
     const aspect = this.size.width / this.size.height;
     this.uniforms = {
@@ -135,7 +157,11 @@ export class DataPigments extends BaseArt {
       uAspect: { value: aspect },
       uEnergy: { value: BASE_ENERGY },
       uWarp: { value: 1.3 },
-      uPaletteShift: { value: 0 },
+      uSpeed: { value: 1 },
+      uMetal: { value: 0.55 },
+      uCDeep: { value: this._toDeep.clone() },
+      uCMid: { value: this._toMid.clone() },
+      uCHi: { value: this._toHi.clone() },
       uTint: { value: this.tint.clone() },
       uTintAmount: { value: 0 },
       uFxPos: { value: Array.from({ length: FX_MAX }, () => new THREE.Vector4()) },
@@ -155,6 +181,21 @@ export class DataPigments extends BaseArt {
     this.renderTarget.texture.colorSpace = THREE.SRGBColorSpace;
   }
 
+  /** The liquid takes its colours straight from the brand palette (eased). */
+  setBrand(_brandId, brand) {
+    const pal = brand?.palette;
+    if (!pal) return;
+    this._toDeep.set(pal.shadow ?? pal.background);
+    this._toMid.set(pal.primary);
+    this._toHi.set(pal.secondary || '#ffffff');
+  }
+
+  setParams(p) {
+    if (p.warp != null) this.warp = p.warp;
+    if (p.speed != null) this.uniforms.uSpeed.value = p.speed;
+    if (p.metal != null) this.uniforms.uMetal.value = p.metal;
+  }
+
   resize(size) {
     this.size = size;
     this.uniforms.uAspect.value = size.width / size.height;
@@ -172,14 +213,18 @@ export class DataPigments extends BaseArt {
 
   update(dt) {
     this.time += dt;
-    this.paletteShift += dt * 0.01;
     this.fx.update(dt);
     const e = this.energy.update(dt);
 
+    // Ease the liquid toward the active brand's palette (smooth brand changes).
+    const k = Math.min(1, dt * 2);
+    this.uniforms.uCDeep.value.lerp(this._toDeep, k);
+    this.uniforms.uCMid.value.lerp(this._toMid, k);
+    this.uniforms.uCHi.value.lerp(this._toHi, k);
+
     this.uniforms.uTime.value = this.time;
     this.uniforms.uEnergy.value = e;
-    this.uniforms.uWarp.value = 1.25 + e * 0.55;
-    this.uniforms.uPaletteShift.value = this.paletteShift;
+    this.uniforms.uWarp.value = this.warp + e * 0.5;
     this.uniforms.uTint.value.copy(this.tint);
     this.uniforms.uTintAmount.value = this.tintAmount.update(dt);
     this.uniforms.uFxCount.value = this.fx.write(this.uniforms.uFxPos.value, this.uniforms.uFxColor.value);
@@ -198,4 +243,4 @@ export class DataPigments extends BaseArt {
   }
 }
 
-registerArt(DataPigments);
+registerArt(DataPigments2);

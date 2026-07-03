@@ -90,11 +90,21 @@ export class Stage {
     return this.state.frame.w / this.state.frame.h;
   }
 
-  _computeArtSize(frame) {
+  // `scale` = per-art supersampling (static resScale) — the art + grade render
+  // larger and the display's linear sampling downsamples (anti-aliasing).
+  _computeArtSize(frame, scale = 1) {
     const aspect = frame.w / frame.h;
+    const res = Math.round(ART_BASE_RESOLUTION * scale);
     return aspect >= 1
-      ? { width: ART_BASE_RESOLUTION, height: Math.round(ART_BASE_RESOLUTION / aspect) }
-      : { width: Math.round(ART_BASE_RESOLUTION * aspect), height: ART_BASE_RESOLUTION };
+      ? { width: res, height: Math.round(res / aspect) }
+      : { width: Math.round(res * aspect), height: res };
+  }
+
+  // Recompute + propagate the render size for the active art class.
+  _applyArtSize(ArtClass) {
+    this._artSize = this._computeArtSize(this.state.frame, ArtClass?.resScale || 1);
+    this.grade.setSize(this._artSize);
+    if (this.nicheRT) this.nicheRT.setSize(this._artSize.width, this._artSize.height);
   }
 
   // The brand an art is themed by — some arts are pinned to one (fixedBrand).
@@ -131,6 +141,7 @@ export class Stage {
     if (!ArtClass) return;
     if (this.art) this.art.destroy();
     this.art = new ArtClass();
+    this._applyArtSize(ArtClass); // honour per-art supersampling (resScale)
     const params = mergedArtParams(this.state, ArtClass.id, ArtClass);
     this.art.init({ renderer: this.renderer, size: this._artSize, frame: this.state.frame, params });
     this.art.setParams(params);
@@ -201,10 +212,8 @@ export class Stage {
 
   setFrame(frame) {
     this.state.frame = { ...this.state.frame, ...frame };
-    this._artSize = this._computeArtSize(this.state.frame);
+    this._applyArtSize(getArt(this.state.artId));
     if (this.art) this.art.resize(this._artSize);
-    this.grade.setSize(this._artSize);
-    this.nicheRT.setSize(this._artSize.width, this._artSize.height);
     this._layoutNicheCam();
     this.views.setAspect(this._frameAspect());
     this.setTarget(this.state.targetId); // rebuild target geometry at the new aspect

@@ -16,7 +16,7 @@ const STORAGE_KEY = 'pda-state-v1';
 
 /** Canonical default state. Frame defaults to 16:9 (160 × 90 cm). */
 const DEFAULT_STATE = {
-  artId: 'data-pigments', // active art option
+  artId: 'data-pigments-2', // active art option
   viewId: 'head-on', // active mockup camera view
   targetId: 'flat', // 'flat' | 'prism' display target
   frameStyle: 'gallery', // picture-frame style (see viewManager FRAME_STYLES)
