@@ -182,13 +182,58 @@ export class CollectiveCanvas extends BaseArt {
   }
 
   // --- shared room sync -----------------------------------------------------
+  // Room tokens: 'xc:<id>' (extendsclass json-storage — id returned in the
+  // response BODY, immune to CORS header quirks), 'jb:<id>' (jsonblob — id in
+  // the Location header), a full custom http(s) URL, or a legacy bare jsonblob
+  // id. Providers are tried in order; creation retries every 30s while local.
   _roomFromHash() {
     const m = (window.location.hash || '').match(/canvas=([^&]+)/);
     return m ? decodeURIComponent(m[1]) : null;
   }
   _endpoint() {
     if (!this.room) return null;
-    return this.room.startsWith('http') ? this.room : `${JSONBLOB}/${this.room}`;
+    if (this.room.startsWith('http')) return this.room;
+    if (this.room.startsWith('xc:')) return `https://json.extendsclass.com/bin/${this.room.slice(3)}`;
+    if (this.room.startsWith('jb:')) return `${JSONBLOB}/${this.room.slice(3)}`;
+    return `${JSONBLOB}/${this.room}`; // legacy bare id
+  }
+
+  async _createRoom() {
+    const payload = JSON.stringify({ strokes: this.strokes });
+    const providers = [
+      async () => { // extendsclass — id in the response body
+        const r = await fetch('https://json.extendsclass.com/bin', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload,
+        });
+        if (!r.ok) throw new Error(`extendsclass ${r.status}`);
+        const j = await r.json();
+        const id = j.id || String(j.uri || '').split('/').pop();
+        if (!id) throw new Error('extendsclass: no id in response');
+        return `xc:${id}`;
+      },
+      async () => { // jsonblob — id in the Location header (must be CORS-exposed)
+        const r = await fetch(JSONBLOB, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: payload,
+        });
+        if (!r.ok) throw new Error(`jsonblob ${r.status}`);
+        const loc = r.headers.get('Location') || r.headers.get('X-jsonblob');
+        const id = loc ? loc.split('/').pop() : null;
+        if (!id) throw new Error('jsonblob: Location header not readable');
+        return `jb:${id}`;
+      },
+    ];
+    this._lastCreate = Date.now();
+    for (const create of providers) {
+      try {
+        this.room = await create();
+        localStorage.setItem(ROOM_KEY, this.room);
+        this._lastErr = '';
+        return true;
+      } catch (e) {
+        this._lastErr = String(e && e.message ? e.message : e);
+      }
+    }
+    return false;
   }
 
   async _startSync() {
@@ -196,27 +241,18 @@ export class CollectiveCanvas extends BaseArt {
     if (this.room) localStorage.setItem(ROOM_KEY, this.room);
     this._status = this.room ? 'joining' : 'local';
     this._renderStatus();
-    if (!this.room) {
-      // Create the shared room from this browser (the sharer's device).
-      try {
-        const res = await fetch(JSONBLOB, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ strokes: this.strokes }),
-        });
-        const loc = res.headers.get('Location') || res.headers.get('X-jsonblob');
-        const id = loc ? loc.split('/').pop() : null;
-        if (id) {
-          this.room = id;
-          localStorage.setItem(ROOM_KEY, id);
-        }
-      } catch { /* stay local-only */ }
-    }
+    if (!this.room) await this._createRoom(); // sharer's device creates the room
     this._syncTimer = setInterval(() => this._syncOnce(), POLL_MS);
     this._syncOnce();
   }
 
   async _syncOnce() {
+    // Self-heal: while local-only, retry room creation every 30s.
+    if (!this.room && !this._creating && Date.now() - (this._lastCreate || 0) > 30000) {
+      this._creating = true;
+      await this._createRoom();
+      this._creating = false;
+    }
     const url = this._endpoint();
     if (!url || this._syncing) { this._renderStatus(); return; }
     this._syncing = true;
@@ -243,8 +279,10 @@ export class CollectiveCanvas extends BaseArt {
         this._dirtyRemote = false;
       }
       this._status = 'live';
-    } catch {
+      this._lastErr = '';
+    } catch (e) {
       this._status = this.room ? 'joining' : 'local';
+      this._lastErr = String(e && e.message ? e.message : e);
     }
     this._syncing = false;
     this._renderStatus();
@@ -321,14 +359,25 @@ export class CollectiveCanvas extends BaseArt {
     this.shareBtn = document.createElement('button');
     this.shareBtn.className = 'pda-paint__share';
     this.shareBtn.textContent = 'Copy share link';
-    this.shareBtn.addEventListener('click', () => {
-      const url = `${window.location.origin}${window.location.pathname}#canvas=${encodeURIComponent(this.room || '')}`;
-      navigator.clipboard?.writeText(url);
-      this.shareBtn.textContent = 'Link copied ✓';
-      setTimeout(() => { this.shareBtn.textContent = 'Copy share link'; }, 1600);
+    this.shareBtn.addEventListener('click', async () => {
+      if (!this.room) await this._createRoom(); // one more try, on demand
+      const url = this.room
+        ? `${window.location.origin}${window.location.pathname}#canvas=${encodeURIComponent(this.room)}`
+        : window.location.href;
+      let copied = false;
+      try { await navigator.clipboard.writeText(url); copied = true; } catch { /* fall through */ }
+      if (!copied) window.prompt('Copy this link:', url); // clipboard blocked → manual
+      this.shareBtn.textContent = this.room ? 'Link copied ✓' : 'Copied (local only)';
+      setTimeout(() => { this.shareBtn.textContent = 'Copy share link'; }, 1800);
+      this._renderStatus();
     });
-    this.statusEl = document.createElement('span');
+    this.statusEl = document.createElement('button');
     this.statusEl.className = 'pda-paint__status';
+    this.statusEl.type = 'button';
+    this.statusEl.addEventListener('click', async () => { // click = retry now
+      if (!this.room) await this._createRoom();
+      this._syncOnce();
+    });
     gShare.append(this.shareBtn, this.statusEl);
 
     document.body.append(bar);
@@ -344,10 +393,10 @@ export class CollectiveCanvas extends BaseArt {
 
   _renderStatus() {
     if (!this.statusEl) return;
-    const map = { live: '● live — shared canvas', joining: '◌ connecting…', local: '○ local only' };
+    const map = { live: '● live — shared canvas', joining: '◌ connecting… (click to retry)', local: '○ local only (click to retry)' };
     this.statusEl.textContent = map[this._status] || '';
     this.statusEl.dataset.state = this._status;
-    if (this.shareBtn) this.shareBtn.disabled = !this.room;
+    this.statusEl.title = this._lastErr || '';
   }
 
   resize() { /* canvas keeps its own resolution */ }
