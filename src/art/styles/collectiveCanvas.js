@@ -41,7 +41,7 @@ const POLL_MS = 4000;
 // supports GET + PUT of a {"strokes": []} document, e.g. a Firebase Realtime
 // Database REST path: 'https://<your-db>.firebasedatabase.app/collective.json'
 // (rules read/write true). Overridable per-link via #canvas=<url>.
-const DEFAULT_ROOM = '';
+const DEFAULT_ROOM = 'https://phygital-canvas-default-rtdb.europe-west1.firebasedatabase.app/collective.json';
 
 const BRAND_SWATCHES = [
   { name: 'IQOS', color: '#00D1D2' },
