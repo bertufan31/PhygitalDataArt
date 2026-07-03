@@ -206,3 +206,109 @@ body {
 .pda-paint__status[data-state="live"] {
   color: #58d68d;
 }
+
+/* --- Collective Canvas: "Live markets" presence overlay ------------------ */
+.pda-crew {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  width: 252px;
+  background: rgba(10, 11, 16, 0.84);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  z-index: 20;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  overflow: hidden;
+}
+.pda-crew__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 12px;
+  background: none;
+  border: 0;
+  color: #e7e9f0;
+  cursor: pointer;
+  font: inherit;
+}
+.pda-crew__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3a3f52;
+  flex: 0 0 auto;
+}
+.pda-crew__dot[data-on="1"] {
+  background: #58d68d;
+  box-shadow: 0 0 8px rgba(88, 214, 141, 0.8);
+}
+.pda-crew__title {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #8b90a3;
+}
+.pda-crew__sum {
+  margin-left: auto;
+  font-size: 11px;
+  color: #b9bdcc;
+  white-space: nowrap;
+}
+.pda-crew__chev {
+  color: #8b90a3;
+  font-size: 11px;
+}
+.pda-crew__list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 12px 10px;
+  max-height: 46vh;
+  overflow-y: auto;
+}
+.pda-crew--min .pda-crew__list {
+  display: none;
+}
+.pda-crew__row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.pda-crew__name {
+  color: #dfe2ec;
+  white-space: nowrap;
+}
+.pda-crew__name em {
+  color: #8b90a3;
+  font-style: normal;
+  font-size: 10px;
+}
+.pda-crew__st {
+  font-size: 11px;
+  white-space: nowrap;
+  color: #6d7285;
+}
+.pda-crew__st--paint {
+  color: #58d68d;
+  font-weight: 600;
+}
+.pda-crew__st--paint::before {
+  content: "● ";
+  animation: crewpulse 1.1s ease-in-out infinite;
+}
+.pda-crew__st--view {
+  color: #7fc7de;
+}
+.pda-crew__st--ago {
+  color: #9a92b8;
+}
+.pda-crew__st--off {
+  color: #565b6e;
+}
+@keyframes crewpulse {
+  50% { opacity: 0.35; }
+}

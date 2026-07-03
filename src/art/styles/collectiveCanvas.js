@@ -56,6 +56,26 @@ const BRUSHES = [
 const STAMPS = ['iqos', 'zyn', 'veev'];
 const STAMP_GLYPH = { iqos: null, zyn: 'zyn', veev: 'veev' }; // null → emblem
 
+// Flagship-market roster. Each joining device claims the next free identity
+// (kept in localStorage), so "user 5" reads as a real market on every screen.
+const MARKETS = [
+  'Tokyo · Ginza',
+  'Warsaw · Poland',
+  'London · UK',
+  'Berlin · Germany',
+  'Milan · Italy',
+  'Seoul · Gangnam',
+  'Madrid · Spain',
+  'Athens · Greece',
+  'Lisbon · Portugal',
+  'Dubai · UAE',
+];
+const DEVICE_KEY = 'pda-collective-device-v1';
+const MARKET_KEY = 'pda-collective-market-v1';
+const CREW_MIN_KEY = 'pda-crew-min';
+const PAINTING_MS = 8000; // painted within → "Painting"
+const ONLINE_MS = 12000; // heartbeat seen within → "Viewing"
+
 export class CollectiveCanvas extends BaseArt {
   static id = 'collective-canvas';
   static label = 'Collective Canvas';
@@ -86,9 +106,18 @@ export class CollectiveCanvas extends BaseArt {
     this._status = 'local'; // 'local' | 'live' | 'joining'
     this._stampCache = {};
 
+    // Presence: this device's identity + everyone's heartbeats.
+    this.deviceId = localStorage.getItem(DEVICE_KEY) || crypto.randomUUID();
+    localStorage.setItem(DEVICE_KEY, this.deviceId);
+    this.myMarket = localStorage.getItem(MARKET_KEY) || null;
+    this.members = {}; // deviceId → { m: market, seen: ts, paint: ts }
+    this._lastPaintT = 0;
+
     this._redraw();
     this._buildToolbar();
+    this._buildCrew();
     this._startSync();
+    this._crewTimer = setInterval(() => this._renderCrew(), 1000);
   }
 
   // --- local persistence --------------------------------------------------
@@ -188,6 +217,7 @@ export class CollectiveCanvas extends BaseArt {
         const last = this._live.p[this._live.p.length - 1];
         if (Math.hypot(px[0] - last[0], px[1] - last[1]) > 0.002) this._live.p.push(px);
       }
+      this._lastPaintT = Date.now(); // presence: actively painting
       this._redraw();
     } else {
       this._stamped = false;
@@ -201,6 +231,7 @@ export class CollectiveCanvas extends BaseArt {
 
   _commit(stroke) {
     this.strokes.push(stroke);
+    this._lastPaintT = Date.now();
     this._saveLocal();
     this._redraw();
     this._dirtyRemote = true;
@@ -290,6 +321,11 @@ export class CollectiveCanvas extends BaseArt {
       const doc = (await res.json()) || {};
       const remote = Array.isArray(doc) ? doc : doc.strokes || [];
       const remoteGen = Array.isArray(doc) ? 0 : doc.gen || 0;
+      // Presence: merge everyone's heartbeats (newest wins per device), claim a
+      // market identity if we don't have one, then stamp our own heartbeat.
+      this._mergeMembers(Array.isArray(doc) ? {} : doc.members);
+      this._claimMarket();
+      this.members[this.deviceId] = { m: this.myMarket, seen: Date.now(), paint: this._lastPaintT || 0 };
       if (remoteGen > (this.gen || 0)) {
         // The canvas was CLEARED (or reset) — a newer generation replaces
         // everything local, so old strokes never get re-seeded.
@@ -297,6 +333,7 @@ export class CollectiveCanvas extends BaseArt {
         this.strokes = remote.slice();
         this._saveLocal();
         this._redraw();
+        await this._put(url, this.strokes); // heartbeat
       } else if (remoteGen < (this.gen || 0)) {
         // Our clear hasn't landed (or was raced) — re-assert it.
         await this._put(url, this.strokes);
@@ -304,16 +341,14 @@ export class CollectiveCanvas extends BaseArt {
         const have = new Set(this.strokes.map((s) => s.id));
         const theirs = new Set(remote.map((s) => s.id));
         const newOnes = remote.filter((s) => !have.has(s.id));
-        const missing = this.strokes.filter((s) => !theirs.has(s.id));
         if (newOnes.length) {
           this.strokes = this.strokes.concat(newOnes);
           this._saveLocal();
           this._redraw();
         }
-        if (missing.length || this._dirtyRemote) {
-          await this._put(url, remote.concat(this.strokes.filter((s) => !theirs.has(s.id))));
-          this._dirtyRemote = false;
-        }
+        // Always PUT: pushes missing strokes AND our presence heartbeat.
+        await this._put(url, remote.concat(this.strokes.filter((s) => !theirs.has(s.id))));
+        this._dirtyRemote = false;
       }
       this._status = 'live';
       this._lastErr = '';
@@ -329,8 +364,25 @@ export class CollectiveCanvas extends BaseArt {
     return fetch(url, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ gen: this.gen || 0, strokes }),
+      body: JSON.stringify({ gen: this.gen || 0, strokes, members: this.members }),
     });
+  }
+
+  // Newest heartbeat wins per device; each device only writes its own entry.
+  _mergeMembers(remoteMembers) {
+    const merged = { ...(remoteMembers || {}) };
+    for (const [id, e] of Object.entries(this.members || {})) {
+      if (!merged[id] || (e.seen || 0) > (merged[id].seen || 0)) merged[id] = e;
+    }
+    this.members = merged;
+  }
+
+  // First free market on the roster becomes this device's identity.
+  _claimMarket() {
+    if (this.myMarket) return;
+    const taken = new Set(Object.values(this.members).map((e) => e.m));
+    this.myMarket = MARKETS.find((n) => !taken.has(n)) || `Store ${Object.keys(this.members).length + 1}`;
+    localStorage.setItem(MARKET_KEY, this.myMarket);
   }
 
   _pushSoon() {
@@ -444,14 +496,100 @@ export class CollectiveCanvas extends BaseArt {
     this.statusEl.title = this._lastErr || '';
   }
 
+  // --- "Live markets" presence overlay ---------------------------------------
+  _buildCrew() {
+    const crew = document.createElement('div');
+    crew.className = 'pda-crew';
+    if (localStorage.getItem(CREW_MIN_KEY) === '1') crew.classList.add('pda-crew--min');
+    const head = document.createElement('button');
+    head.className = 'pda-crew__head';
+    head.type = 'button';
+    head.innerHTML = '<span class="pda-crew__dot"></span><span class="pda-crew__title">Live markets</span><span class="pda-crew__sum"></span><span class="pda-crew__chev">▾</span>';
+    head.addEventListener('click', () => {
+      crew.classList.toggle('pda-crew--min');
+      localStorage.setItem(CREW_MIN_KEY, crew.classList.contains('pda-crew--min') ? '1' : '0');
+      this._renderCrew();
+    });
+    const list = document.createElement('ul');
+    list.className = 'pda-crew__list';
+    crew.append(head, list);
+    document.body.append(crew);
+    this.crew = crew;
+    this._crewList = list;
+    this._crewSum = head.querySelector('.pda-crew__sum');
+    this._crewChev = head.querySelector('.pda-crew__chev');
+    this._renderCrew();
+  }
+
+  _agoText(ms) {
+    if (ms < 60000) return 'Painted moments ago';
+    const m = Math.floor(ms / 60000);
+    if (m < 60) return `Painted ${m}m ago`;
+    return `Painted ${Math.floor(m / 60)}h ago`;
+  }
+
+  _stateFor(entry, now) {
+    if (entry.paint && now - entry.paint < PAINTING_MS) return { k: 'paint', t: 'Painting' };
+    if (now - (entry.seen || 0) < ONLINE_MS) return { k: 'view', t: 'Viewing' };
+    if (entry.paint) return { k: 'ago', t: this._agoText(now - entry.paint) };
+    return { k: 'off', t: 'Offline' };
+  }
+
+  // Ambient (mock) state for roster markets no real device has claimed yet —
+  // deterministic from wall-clock buckets, so every viewer sees the same thing.
+  // Ambient markets never show "Painting": only real devices paint.
+  _fakeState(name, now) {
+    const bucket = Math.floor(now / 90000);
+    let h = 0;
+    const s = name + bucket;
+    for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+    const r = h % 100;
+    if (r < 36) return { k: 'off', t: 'Offline' };
+    if (r < 60) return { k: 'view', t: 'Viewing' };
+    const mins = 1 + ((h >> 3) % 28);
+    return { k: 'ago', t: `Painted ${mins}m ago` };
+  }
+
+  _renderCrew() {
+    if (!this._crewList) return;
+    const now = Date.now();
+    const byMarket = {};
+    for (const [id, e] of Object.entries(this.members || {})) {
+      if (!e.m) continue;
+      if (!byMarket[e.m] || (e.seen || 0) > (byMarket[e.m].e.seen || 0)) byMarket[e.m] = { id, e };
+    }
+    const rows = [];
+    let painting = 0;
+    let online = 0;
+    const addRow = (name, st, you) => {
+      if (st.k === 'paint') painting++;
+      if (st.k === 'paint' || st.k === 'view') online++;
+      rows.push(`<li class="pda-crew__row"><span class="pda-crew__name">${name}${you ? ' <em>(you)</em>' : ''}</span><span class="pda-crew__st pda-crew__st--${st.k}">${st.t}</span></li>`);
+    };
+    for (const name of MARKETS) {
+      const real = byMarket[name];
+      if (real) addRow(name, this._stateFor(real.e, now), real.id === this.deviceId);
+      else addRow(name, this._fakeState(name, now), false);
+    }
+    for (const [market, real] of Object.entries(byMarket)) { // joiners beyond the roster
+      if (!MARKETS.includes(market)) addRow(market, this._stateFor(real.e, now), real.id === this.deviceId);
+    }
+    this._crewList.innerHTML = rows.join('');
+    this._crewSum.textContent = `${painting} painting · ${online} online`;
+    this._crewChev.textContent = this.crew.classList.contains('pda-crew--min') ? '▸' : '▾';
+    this.crew.querySelector('.pda-crew__dot').dataset.on = painting > 0 ? '1' : '0';
+  }
+
   resize() { /* canvas keeps its own resolution */ }
   update() { /* CanvasTexture updates via needsUpdate on draw */ }
   get texture() { return this.tex; }
 
   destroy() {
     clearInterval(this._syncTimer);
+    clearInterval(this._crewTimer);
     clearTimeout(this._pushT);
     this.bar?.remove();
+    this.crew?.remove();
     this.tex.dispose();
   }
 }
